@@ -1,19 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Modal, Form, Input, Select, Upload, Button, Space, Card, message, Spin, notification, Empty } from 'antd';
-import { UploadOutlined, MinusCircleOutlined, PlusCircleOutlined, UserOutlined, ShopOutlined, PhoneOutlined, IdcardOutlined, HomeOutlined, UserSwitchOutlined, CreditCardOutlined, FileAddOutlined } from '@ant-design/icons';
+import { Drawer, Form, Input, Select, Upload, Button, Space, Card, message, Spin, notification, Empty, Row, Col, Divider, Typography, Avatar, Alert, Modal, App } from 'antd';
+import { UploadOutlined, MinusCircleOutlined, PlusCircleOutlined, UserOutlined, ShopOutlined, PhoneOutlined, IdcardOutlined, HomeOutlined, UserSwitchOutlined, CreditCardOutlined, FileAddOutlined, EnvironmentOutlined, FileTextOutlined, PlusOutlined, ScanOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
-import { API_BASE } from '../../api/client';
-import type { AppDispatch } from '../../app/store';
+import { API_BASE, getAuthHeaders } from '../../api/client';
+import type { AppDispatch, RootState } from '../../app/store';
 import {
   Customer,
   EnterpriseCustomer
 } from './customerSlice';
 import { fetchStores, selectStores } from '../stores/storesSlice';
-import { fetchEmployees, selectEmployees } from '../employees/employeesSlice';
+import { fetchUsers } from '../users/usersSlice';
+import { recognizeIDCard, recognizeBusinessLicense, type IDCardOCRResult, type BusinessLicenseOCRResult } from '../../utils/ocr';
 
 const { Option } = Select;
 const { TextArea } = Input;
+const { Title, Text } = Typography;
 
 interface AddCustomerModalProps {
   visible: boolean;
@@ -28,20 +30,23 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
   onCancel, 
   onSuccess 
 }) => {
+  const { message: messageApi, modal } = App.useApp();
   const dispatch = useDispatch<AppDispatch>();
   const stores = useSelector(selectStores);
-  const employees = useSelector(selectEmployees);
+  const users = useSelector((state: RootState) => state.users?.users || []);
   const [form] = Form.useForm();
   const [customerType, setCustomerType] = useState<'personal' | 'enterprise'>('personal');
   const [contactForms, setContactForms] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [ocrProcessing, setOcrProcessing] = useState(false);
+  const [ocrResult, setOcrResult] = useState<IDCardOCRResult | BusinessLicenseOCRResult | null>(null);
 
-  // 加载门店与员工列表
+  // 加载门店与用户列表
   useEffect(() => {
     if (visible) {
       dispatch(fetchStores());
-      dispatch(fetchEmployees());
+      dispatch(fetchUsers({ page: 1, pageSize: 100 }));
     }
   }, [visible, dispatch]);
 
@@ -96,13 +101,13 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
   useEffect(() => {
     if (visible && customer) {
       const currentStoreId = (customer as any).regionStoreId || stores.find(s => s.name === ((customer as any).regionStoreName || (customer as any).region))?.id;
-      const currentManagerId = (customer as any).businessManagerId || employees.find(e => e.name === ((customer as any).businessManagerName || (customer as any).businessManager))?.id;
+      const currentManagerId = (customer as any).businessManagerId || users.find((u: any) => u.name === ((customer as any).businessManagerName || (customer as any).businessManager))?.id;
       form.setFieldsValue({
         regionStoreId: currentStoreId,
         businessManagerId: currentManagerId,
       });
     }
-  }, [visible, customer, stores, employees, form]);
+  }, [visible, customer, stores, users, form]);
 
   // 处理客户类型变更
   const handleTypeChange = (type: 'personal' | 'enterprise') => {
@@ -119,35 +124,13 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
   // 添加联系人
   const addContact = () => {
     setContactForms([...contactForms, `contact_${Date.now()}`]);
-    notification.success({
-      message: '添加成功',
-      description: '已添加新的联系人表单',
-      placement: 'bottomRight',
-      duration: 2
-    });
   };
 
   // 移除联系人
   const removeContact = (index: number) => {
-    Modal.confirm({
-      title: '确定要移除这个联系人吗？',
-      icon: <MinusCircleOutlined />,
-      content: '移除后数据将无法恢复',
-      okText: '确定',
-      okType: 'danger',
-      cancelText: '取消',
-      onOk() {
-        const newContactForms = [...contactForms];
-        newContactForms.splice(index, 1);
-        setContactForms(newContactForms);
-        notification.success({
-          message: '移除成功',
-          description: '已移除联系人',
-          placement: 'bottomRight',
-          duration: 2
-        });
-      }
-    });
+    const newContactForms = [...contactForms];
+    newContactForms.splice(index, 1);
+    setContactForms(newContactForms);
   };
 
   // 自定义表单验证
@@ -189,9 +172,7 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
     name: 'file',
     multiple: true,
     action: `${API_BASE}/upload`,
-    headers: {
-      authorization: 'authorization-text',
-    },
+    headers: getAuthHeaders(),
     beforeUpload(file) {
       const isLessThan2M = file.size / 1024 / 1024 < 2;
       if (!isLessThan2M) {
@@ -203,33 +184,119 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
     onChange(info) {
       const { status } = info.file;
       if (status === 'done') {
-        // 写入后端返回的可访问 URL 到文件项，便于后续提交映射
         const url = (info.file.response && (info.file.response.file?.url || info.file.response.url)) || info.file.url;
         if (url) {
           (info.file as any).url = url;
         }
-        message.success({
-          content: `${info.file.name} 文件上传成功`,
-          duration: 2
-        });
+        message.success(`${info.file.name} 上传成功`);
       } else if (status === 'error') {
-        message.error({
-          content: `${info.file.name} 文件上传失败`,
-          duration: 2
-        });
-      } else if (status === 'uploading') {
-        // 可以在这里显示上传进度
+        message.error(`${info.file.name} 上传失败`);
       }
     },
-    onDrop(_e) {
-        // console.log('Dropped files', e.dataTransfer.files);
-      },
   };
 
-  // Upload 与 Form 的值映射（避免 antd Upload value 警告）
+  // Upload 与 Form 的值映射
   const normFile = (e: any) => {
     if (Array.isArray(e)) return e;
     return e?.fileList || [];
+  };
+
+  // OCR 识别 - 身份证
+  const handleIDCardOCR = async (file: File) => {
+    setOcrProcessing(true);
+    
+    const handleProgress = (status: 'loading' | 'success' | 'error', msg: string) => {
+      if (status === 'loading') {
+        messageApi.loading({ content: msg, key: 'ocr', duration: 0 });
+      } else if (status === 'success') {
+        messageApi.success({ content: msg, key: 'ocr', duration: 2 });
+      } else {
+        messageApi.error({ content: msg, key: 'ocr', duration: 3 });
+      }
+    };
+    
+    try {
+      const result = await recognizeIDCard(file, handleProgress);
+      if (result) {
+        setOcrResult(result);
+        // 显示确认对话框
+        modal.confirm({
+          title: '识别成功',
+          icon: <CheckCircleOutlined style={{ color: '#52c41a' }} />,
+          content: (
+            <div>
+              <p>已识别到以下信息，是否自动填充？</p>
+              <div style={{ marginTop: 12, padding: 12, background: '#f5f5f5', borderRadius: 4 }}>
+                {result.name && <div><strong>姓名：</strong>{result.name}</div>}
+                {result.idNumber && <div><strong>身份证号：</strong>{result.idNumber}</div>}
+                {result.address && <div><strong>地址：</strong>{result.address}</div>}
+              </div>
+            </div>
+          ),
+          onOk: () => {
+            form.setFieldsValue({
+              name: result.name || '',
+              idCardNumber: result.idNumber || '',
+            });
+            messageApi.success('已自动填充表单');
+          },
+        });
+      }
+    } catch (error) {
+      console.error('OCR识别失败:', error);
+    } finally {
+      setOcrProcessing(false);
+    }
+  };
+
+  // OCR 识别 - 营业执照
+  const handleBusinessLicenseOCR = async (file: File) => {
+    setOcrProcessing(true);
+    
+    const handleProgress = (status: 'loading' | 'success' | 'error', msg: string) => {
+      if (status === 'loading') {
+        messageApi.loading({ content: msg, key: 'ocr', duration: 0 });
+      } else if (status === 'success') {
+        messageApi.success({ content: msg, key: 'ocr', duration: 2 });
+      } else {
+        messageApi.error({ content: msg, key: 'ocr', duration: 3 });
+      }
+    };
+    
+    try {
+      const result = await recognizeBusinessLicense(file, handleProgress);
+      if (result) {
+        setOcrResult(result);
+        // 显示确认对话框
+        modal.confirm({
+          title: '识别成功',
+          icon: <CheckCircleOutlined style={{ color: '#52c41a' }} />,
+          content: (
+            <div>
+              <p>已识别到以下信息，是否自动填充？</p>
+              <div style={{ marginTop: 12, padding: 12, background: '#f5f5f5', borderRadius: 4 }}>
+                {result.companyName && <div><strong>企业名称：</strong>{result.companyName}</div>}
+                {result.creditCode && <div><strong>信用代码：</strong>{result.creditCode}</div>}
+                {result.address && <div><strong>地址：</strong>{result.address}</div>}
+                {result.legalPerson && <div><strong>法人：</strong>{result.legalPerson}</div>}
+              </div>
+            </div>
+          ),
+          onOk: () => {
+            form.setFieldsValue({
+              companyName: result.companyName || '',
+              creditCode: result.creditCode || '',
+              address: result.address || '',
+            });
+            messageApi.success('已自动填充表单');
+          },
+        });
+      }
+    } catch (error) {
+      console.error('OCR识别失败:', error);
+    } finally {
+      setOcrProcessing(false);
+    }
   };
 
   // 处理表单提交
@@ -239,7 +306,7 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
       const values = await form.validateFields();
 
       const selectedStore = stores.find(s => s.id === values.regionStoreId);
-      const selectedEmployee = employees.find(e => e.id === values.businessManagerId);
+      const selectedUser = users.find((u: any) => u.id === values.businessManagerId);
 
       let customerData: Customer | EnterpriseCustomer;
       if (customerType === 'personal') {
@@ -248,12 +315,11 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
           id: customer?.id || `new_${Date.now()}`,
           type: 'personal',
           region: selectedStore?.name || '',
-          businessManager: selectedEmployee?.name || '',
-          // 关联字段
+          businessManager: selectedUser?.name || '',
           regionStoreId: selectedStore?.id,
           regionStoreName: selectedStore?.name,
-          businessManagerId: selectedEmployee?.id,
-          businessManagerName: selectedEmployee?.name,
+          businessManagerId: selectedUser?.id,
+          businessManagerName: selectedUser?.name,
           name: values.name,
           phone: values.phone,
           idCardNumber: values.idCardNumber,
@@ -277,12 +343,11 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
           id: customer?.id || `new_${Date.now()}`,
           type: 'enterprise',
           region: selectedStore?.name || '',
-          businessManager: selectedEmployee?.name || '',
-          // 关联字段
+          businessManager: selectedUser?.name || '',
           regionStoreId: selectedStore?.id,
           regionStoreName: selectedStore?.name,
-          businessManagerId: selectedEmployee?.id,
-          businessManagerName: selectedEmployee?.name,
+          businessManagerId: selectedUser?.id,
+          businessManagerName: selectedUser?.name,
           companyName: values.companyName,
           creditCode: values.creditCode,
           address: values.address,
@@ -297,348 +362,226 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
         };
       }
 
-      message.success({
-        content: customer ? '客户更新成功' : '客户添加成功',
-        duration: 2,
-        onClose: () => {
-          onSuccess(customerData);
-        }
-      });
+      onSuccess(customerData);
+      message.success(customer ? '客户更新成功' : '客户添加成功');
     } catch (error: any) {
-      message.error({
-        content: '表单验证失败，请检查输入内容',
-        duration: 3
-      });
       console.error('表单验证失败:', error);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // 渲染个人客户字段
-  const renderPersonalFields = () => (
-    <Card className="mb-4" title={<span><UserOutlined className="mr-2" />个人基本信息</span>} variant="outlined">
-      <Form.Item
-        label="姓名"
-        name="name"
-        rules={[
-          { required: true, message: '请输入姓名' }
-        ]}
-        className="mb-4"
-      >
-        <Input prefix={<UserOutlined />} placeholder="请输入姓名" size="large" />
-      </Form.Item>
-      
-      <Form.Item
-        label="电话"
-        name="phone"
-        rules={[
-          { validator: validatePhone }
-        ]}
-        className="mb-4"
-      >
-        <Input prefix={<PhoneOutlined />} placeholder="请输入手机号码" size="large" />
-      </Form.Item>
-      
-      <Form.Item
-        label="身份证号码"
-        name="idCardNumber"
-        rules={[
-          { validator: validateIdCard }
-        ]}
-        className="mb-4"
-      >
-        <Input prefix={<IdcardOutlined />} placeholder="请输入身份证号码" size="large" />
-      </Form.Item>
-    </Card>
-  );
-
-  // 渲染企业客户字段
-  const renderEnterpriseFields = () => (
-    <>
-      <Card className="mb-4" title={<span><ShopOutlined className="mr-2" />企业基本信息</span>} variant="outlined">
-        <Form.Item
-          label="企业名称"
-          name="companyName"
-          rules={[
-            { required: true, message: '请输入企业名称' }
-          ]}
-          className="mb-4"
-        >
-          <Input prefix={<ShopOutlined />} placeholder="请输入企业名称" size="large" />
-        </Form.Item>
-        
-        <Form.Item
-          label="企业信用代码"
-          name="creditCode"
-          rules={[
-            { validator: validateCreditCode }
-          ]}
-          className="mb-4"
-        >
-          <Input prefix={<CreditCardOutlined />} placeholder="请输入企业信用代码" size="large" />
-        </Form.Item>
-        
-        <Form.Item
-          label="企业地址"
-          name="address"
-          rules={[
-            { required: true, message: '请输入企业地址' }
-          ]}
-          className="mb-4"
-        >
-          <TextArea rows={3} placeholder="请输入企业地址" size="large" />
-        </Form.Item>
-      </Card>
-      
-      <Card className="mb-4" title={<span><UserSwitchOutlined className="mr-2" />联系人信息</span>} variant="outlined" extra={
-        contactForms.length === 0 ? (
-          <Button 
-            type="primary" 
-            size="small" 
-            onClick={addContact}
-            icon={<FileAddOutlined />}
-          >
-            添加联系人
-          </Button>
-        ) : null
-      }>
-        {contactForms.length === 0 ? (
-          <div className="text-center text-gray-500 py-4">
-            <p>暂无联系人信息</p>
-            <Button 
-              type="dashed" 
-              onClick={addContact}
-              className="mt-2"
-              icon={<PlusCircleOutlined />}
-            >
-              添加联系人
-            </Button>
-          </div>
-        ) : (
-          <>
-            {contactForms.map((_, index) => (
-              <Card key={index} size="small" title={`联系人 ${index + 1}`} variant="outlined" extra={
-                contactForms.length > 1 ? (
-                  <MinusCircleOutlined 
-                    onClick={() => removeContact(index)}
-                    className="text-red-500 hover:text-red-700 cursor-pointer"
-                  />
-                ) : null
-              } className="mb-4">
-                <Form.Item
-                  label="姓名"
-                  name={`contactName_${index}`}
-                  rules={[
-                    { required: true, message: '请输入联系人姓名' }
-                  ]}
-                  className="mb-3"
-                >
-                  <Input prefix={<UserOutlined />} placeholder="请输入联系人姓名" size="middle" />
-                </Form.Item>
-                
-                <Form.Item
-                  label="电话"
-                  name={`contactPhone_${index}`}
-                  rules={[
-                    { validator: validatePhone }
-                  ]}
-                  className="mb-3"
-                >
-                  <Input prefix={<PhoneOutlined />} placeholder="请输入联系电话" size="middle" />
-                </Form.Item>
-                
-                <Form.Item
-                  label="职务"
-                  name={`contactPosition_${index}`}
-                  rules={[
-                    { required: true, message: '请输入职务' }
-                  ]}
-                  className="mb-0"
-                >
-                  <Input prefix={<UserSwitchOutlined />} placeholder="请输入职务" size="middle" />
-                </Form.Item>
-              </Card>
-            ))}
-            <Button 
-              type="dashed" 
-              onClick={addContact} 
-              block
-              icon={<PlusCircleOutlined />}
-              className="mt-2"
-            >
-              添加更多联系人
-            </Button>
-          </>
-        )}
-      </Card>
-    </>
-  );
-
-  // 附件上传卡片
-  const renderAttachmentSection = () => (
-    <Card className="mb-4" title={<span><UploadOutlined className="mr-2" />附件上传</span>} variant="outlined">
-      <Form.Item
-        name="attachments"
-        valuePropName="fileList"
-        getValueFromEvent={normFile}
-        className="mb-0"
-      >
-        <Upload.Dragger {...uploadProps} className="border-dashed border-gray-300 rounded-lg transition-all hover:border-blue-500">
-          <div className="flex flex-col items-center justify-center py-10">
-            <div className="text-blue-500 mb-4">
-              <UploadOutlined style={{ fontSize: 48 }} />
-            </div>
-            <p className="text-lg font-medium text-gray-700 mb-2">点击或拖拽文件到此区域上传</p>
-            <p className="text-sm text-gray-500">
-              {customerType === 'personal' 
-                ? '支持上传身份证扫描件或照片 (最大2MB)' 
-                : '支持上传企业营业执照和联系人证件 (最大2MB)'}
-            </p>
-          </div>
-        </Upload.Dragger>
-      </Form.Item>
-    </Card>
-  );
-
   return (
-    <Modal
+    <Drawer
       title={
-        <div className="flex items-center">
-          {customer ? (
-            <UserOutlined className="mr-2 text-blue-500" />
-          ) : (
-            <FileAddOutlined className="mr-2 text-blue-500" />
-          )}
-          <span>{customer ? '编辑客户' : '添加客户'}</span>
-        </div>
+        <Space>
+          <Avatar style={{ backgroundColor: '#1890ff' }} icon={customer ? <UserOutlined /> : <FileAddOutlined />} />
+          <span style={{ fontSize: 16, fontWeight: 600 }}>{customer ? '编辑客户资料' : '录入新客户'}</span>
+        </Space>
       }
+      width={720}
       open={visible}
-      onCancel={onCancel}
-      footer={null}
-      width={800}
-      forceRender
-      styles={{
-        body: {
-          maxHeight: '70vh',
-          overflowY: 'auto'
-        }
-      }}
-      maskClosable={false}
-      keyboard={false}
+      onClose={onCancel}
+      styles={{ body: { paddingBottom: 80, background: '#f5f7fa' } }}
+      extra={
+        <Space>
+          <Button onClick={onCancel}>取消</Button>
+          <Button onClick={handleSubmit} type="primary" loading={isSubmitting}>
+            提交
+          </Button>
+        </Space>
+      }
     >
-      <Spin spinning={isLoading} tip="加载中..." size="large">
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={handleSubmit}
-          initialValues={{
-            type: 'personal'
-          }}
-          className="space-y-4"
-        >
-          {/* 基础信息 */}
-          <Card title={<span><HomeOutlined className="mr-2" />基础信息</span>} variant="outlined">
-            <Form.Item
-              label="所属区域"
-              name="regionStoreId"
-              rules={[
-                { required: true, message: '请选择所属区域' }
-              ]}
-              className="mb-4"
-            >
-              <Select 
-                placeholder="请选择所属区域" 
-                size="large"
-                showSearch
-                optionFilterProp="children"
-                notFoundContent={<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无门店数据" />}
+      <Spin spinning={isLoading} tip="加载数据中...">
+        <Form form={form} layout="vertical" hideRequiredMark>
+          <Row gutter={16}>
+            <Col span={24}>
+              <Card variant="borderless" title="基础信息" className="mb-4" style={{ borderRadius: 8, boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+                <Row gutter={16}>
+                  <Col span={12}>
+                    <Form.Item
+                      name="regionStoreId"
+                      label="所属区域/门店"
+                      rules={[{ required: true, message: '请选择所属区域' }]}
+                    >
+                      <Select placeholder="选择门店" showSearch optionFilterProp="children">
+                        {stores.map((store) => (
+                          <Option key={store.id} value={store.id}>{store.name}</Option>
+                        ))}
+                      </Select>
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item
+                      name="businessManagerId"
+                      label="业务负责人"
+                      rules={[{ required: true, message: '请选择业务负责人' }]}
+                    >
+                      <Select placeholder="选择负责人" showSearch optionFilterProp="children">
+                        {users.map((emp: any) => (
+                          <Option key={emp.id} value={emp.id}>{emp.name}</Option>
+                        ))}
+                      </Select>
+                    </Form.Item>
+                  </Col>
+                  <Col span={24}>
+                    <Form.Item
+                      name="type"
+                      label="客户类型"
+                      rules={[{ required: true, message: '请选择客户类型' }]}
+                      initialValue="personal"
+                    >
+                      <Select onChange={handleTypeChange} style={{ width: '100%' }}>
+                        <Option value="personal"><Space><UserOutlined /> 个人客户</Space></Option>
+                        <Option value="enterprise"><Space><ShopOutlined /> 企业客户</Space></Option>
+                      </Select>
+                    </Form.Item>
+                  </Col>
+                </Row>
+              </Card>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={24}>
+              <Card 
+                variant="borderless" 
+                title="详细信息" 
+                className="mb-4" 
+                style={{ borderRadius: 8, boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}
+                extra={
+                  <Upload
+                    accept="image/*"
+                    showUploadList={false}
+                    beforeUpload={(file) => {
+                      if (customerType === 'personal') {
+                        handleIDCardOCR(file);
+                      } else {
+                        handleBusinessLicenseOCR(file);
+                      }
+                      return false;
+                    }}
+                  >
+                    <Button 
+                      icon={<ScanOutlined />} 
+                      type="primary" 
+                      ghost 
+                      loading={ocrProcessing}
+                      size="small"
+                    >
+                      {customerType === 'personal' ? '拍照识别身份证' : '拍照识别营业执照'}
+                    </Button>
+                  </Upload>
+                }
               >
-                {stores.map((store) => (
-                  <Option key={store.id} value={store.id}>{store.name}</Option>
-                ))}
-              </Select>
-            </Form.Item>
-            
-            <Form.Item
-              label="业务负责人"
-              name="businessManagerId"
-              rules={[
-                { required: true, message: '请选择业务负责人' }
-              ]}
-              className="mb-0"
-            >
-              <Select 
-                placeholder="请选择业务负责人" 
-                size="large"
-                showSearch
-                optionFilterProp="children"
-                notFoundContent={<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无员工数据" />}
-              >
-                {employees.map((emp) => (
-                  <Option key={emp.id} value={emp.id}>{emp.name}</Option>
-                ))}
-              </Select>
-            </Form.Item>
+                {ocrProcessing && (
+                  <Alert
+                    message="正在识别中..."
+                    description="请稍候，正在使用AI识别证件信息"
+                    type="info"
+                    showIcon
+                    style={{ marginBottom: 16 }}
+                  />
+                )}
+                
+                {customerType === 'personal' ? (
+                  <Row gutter={16}>
+                    <Col span={12}>
+                      <Form.Item name="name" label="客户姓名" rules={[{ required: true, message: '请输入姓名' }]}>
+                        <Input placeholder="请输入姓名或上传身份证识别" prefix={<UserOutlined style={{ color: '#ccc' }} />} />
+                      </Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item name="phone" label="联系电话" rules={[{ validator: validatePhone }]}>
+                        <Input placeholder="请输入手机号码" prefix={<PhoneOutlined style={{ color: '#ccc' }} />} />
+                      </Form.Item>
+                    </Col>
+                    <Col span={24}>
+                      <Form.Item name="idCardNumber" label="身份证号码" rules={[{ validator: validateIdCard }]}>
+                        <Input placeholder="请输入身份证号码或上传身份证识别" prefix={<IdcardOutlined style={{ color: '#ccc' }} />} />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                ) : (
+                  <Row gutter={16}>
+                    <Col span={24}>
+                      <Form.Item name="companyName" label="企业名称" rules={[{ required: true, message: '请输入企业名称' }]}>
+                        <Input placeholder="请输入企业全称或上传营业执照识别" prefix={<ShopOutlined style={{ color: '#ccc' }} />} />
+                      </Form.Item>
+                    </Col>
+                    <Col span={24}>
+                      <Form.Item name="creditCode" label="统一社会信用代码" rules={[{ validator: validateCreditCode }]}>
+                        <Input placeholder="18位信用代码或上传营业执照识别" prefix={<CreditCardOutlined style={{ color: '#ccc' }} />} />
+                      </Form.Item>
+                    </Col>
+                    <Col span={24}>
+                      <Form.Item name="address" label="注册/经营地址" rules={[{ required: true }]}>
+                        <TextArea rows={2} placeholder="详细地址" />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                )}
+              </Card>
+            </Col>
+          </Row>
+
+          {customerType === 'enterprise' && (
+             <Card 
+               variant="borderless" 
+               title="联系人信息" 
+               className="mb-4" 
+               style={{ borderRadius: 8, boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}
+               extra={<Button type="link" icon={<PlusCircleOutlined />} onClick={addContact}>添加联系人</Button>}
+             >
+               {contactForms.length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无联系人" />}
+               {contactForms.map((_, index) => (
+                 <div key={index} style={{ background: '#fafafa', padding: 16, borderRadius: 6, marginBottom: 16, position: 'relative' }}>
+                    <Button 
+                      type="text" 
+                      danger 
+                      icon={<MinusCircleOutlined />} 
+                      style={{ position: 'absolute', right: 8, top: 8 }} 
+                      onClick={() => removeContact(index)}
+                    />
+                    <Row gutter={16}>
+                       <Col span={8}>
+                          <Form.Item name={`contactName_${index}`} label="姓名" rules={[{ required: true }]} style={{ marginBottom: 0 }}>
+                             <Input placeholder="姓名" />
+                          </Form.Item>
+                       </Col>
+                       <Col span={8}>
+                          <Form.Item name={`contactPhone_${index}`} label="电话" rules={[{ validator: validatePhone }]} style={{ marginBottom: 0 }}>
+                             <Input placeholder="电话" />
+                          </Form.Item>
+                       </Col>
+                       <Col span={8}>
+                          <Form.Item name={`contactPosition_${index}`} label="职务" rules={[{ required: true }]} style={{ marginBottom: 0 }}>
+                             <Input placeholder="职务" />
+                          </Form.Item>
+                       </Col>
+                    </Row>
+                 </div>
+               ))}
+             </Card>
+          )}
+
+          <Card variant="borderless" title="附件资料" style={{ borderRadius: 8, boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+             <Form.Item name="attachments" valuePropName="fileList" getValueFromEvent={normFile} noStyle>
+                <Upload
+                  {...uploadProps}
+                  listType="picture-card"
+                  className="avatar-uploader"
+                >
+                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                      <PlusOutlined style={{ fontSize: 24, color: '#999' }} />
+                      <div style={{ marginTop: 8, color: '#666' }}>上传附件</div>
+                   </div>
+                </Upload>
+             </Form.Item>
           </Card>
-          
-          {/* 客户类型选择 */}
-          <Card title={<span><UserSwitchOutlined className="mr-2" />客户类型</span>} variant="outlined">
-            <Form.Item
-              label="选择客户类型"
-              name="type"
-              rules={[
-                { required: true, message: '请选择客户类型' }
-              ]}
-              className="mb-0"
-            >
-              <Select 
-                onChange={handleTypeChange} 
-                size="large"
-                className="transition-all"
-              >
-                <Option value="personal">
-                  <div className="flex items-center">
-                    <UserOutlined className="mr-2" />
-                    <span>个人客户</span>
-                  </div>
-                </Option>
-                <Option value="enterprise">
-                  <div className="flex items-center">
-                    <ShopOutlined className="mr-2" />
-                    <span>企业客户</span>
-                  </div>
-                </Option>
-              </Select>
-            </Form.Item>
-          </Card>
-          
-          {/* 根据客户类型显示不同的字段 */}
-          {customerType === 'personal' ? renderPersonalFields() : renderEnterpriseFields()}
-          
-          {/* 附件上传部分 */}
-          {renderAttachmentSection()}
-          
-          {/* 提交按钮 */}
-          <div className="flex justify-end pt-4 border-t">
-            <Space size="middle">
-              <Button onClick={onCancel} size="large">
-                取消
-              </Button>
-              <Button 
-                type="primary" 
-                htmlType="submit" 
-                size="large"
-                loading={isSubmitting}
-                className="px-6"
-              >
-                {customer ? '更新' : '添加'}
-              </Button>
-            </Space>
-          </div>
         </Form>
       </Spin>
-    </Modal>
+    </Drawer>
   );
 };
 

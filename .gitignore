@@ -79,3 +79,30 @@ Desktop.ini
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# Project specific
+# Logs and debug files
+api-debug.log
+api-full-debug.log
+test_results.log
+debug_*.html
+*.debug.js
+
+# Database backups
+database_backups/
+*.sql.backup
+*.sql.bak
+
+# Uploads and generated files
+server/uploads/
+server/secure_uploads/
+
+# Temporary scripts and migration tools
+*_temp.js
+*_test.js
+migrate_*.bat
+run_*.bat
+
+# Documentation drafts
+docs/*-draft.md
+docs/*-temp.md

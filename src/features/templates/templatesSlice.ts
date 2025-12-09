@@ -1,7 +1,120 @@
-import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import type { TemplatesState, Template, TemplateType, TemplateVersion } from './types';
+import { apiGet, apiPost, apiPut, apiDelete } from '../../api/client';
 
 const now = () => new Date().toISOString();
+
+// ============================================
+// 异步 Thunks - 连接后端 API
+// ============================================
+
+/**
+ * 获取模板列表
+ */
+export const fetchTemplates = createAsyncThunk(
+  'templates/fetchTemplates',
+  async (params?: { type?: TemplateType; status?: string; page?: number; pageSize?: number }) => {
+    let url = '/templates';
+    if (params) {
+      const queryParams = new URLSearchParams();
+      if (params.type) queryParams.append('type', params.type);
+      if (params.status) queryParams.append('status', params.status);
+      if (params.page) queryParams.append('page', params.page.toString());
+      if (params.pageSize) queryParams.append('pageSize', params.pageSize.toString());
+      const query = queryParams.toString();
+      if (query) url += `?${query}`;
+    }
+    return await apiGet(url);
+  }
+);
+
+/**
+ * 获取单个模板详情
+ */
+export const fetchTemplateById = createAsyncThunk(
+  'templates/fetchTemplateById',
+  async (id: string) => {
+    return await apiGet(`/templates/${id}`);
+  }
+);
+
+/**
+ * 创建模板
+ */
+export const createTemplate = createAsyncThunk(
+  'templates/createTemplate',
+  async (template: { name: string; type: TemplateType; content: string; description?: string; isDefault?: boolean; mappings?: any[] }) => {
+    return await apiPost('/templates', template);
+  }
+);
+
+/**
+ * 更新模板
+ */
+export const updateTemplateAsync = createAsyncThunk(
+  'templates/updateTemplate',
+  async ({ id, changes }: { id: string; changes: Partial<Template> }) => {
+    await apiPut(`/templates/${id}`, changes);
+    return { id, changes };
+  }
+);
+
+/**
+ * 删除模板
+ */
+export const deleteTemplateAsync = createAsyncThunk(
+  'templates/deleteTemplate',
+  async (id: string) => {
+    await apiDelete(`/templates/${id}`);
+    return id;
+  }
+);
+
+/**
+ * 获取默认模板
+ */
+export const fetchDefaultTemplate = createAsyncThunk(
+  'templates/fetchDefaultTemplate',
+  async (type: TemplateType) => {
+    return await apiGet(`/templates/default/${type}`);
+  }
+);
+
+/**
+ * 复制模板
+ */
+export const copyTemplateAsync = createAsyncThunk(
+  'templates/copyTemplate',
+  async (id: string) => {
+    return await apiPost(`/templates/${id}/copy`, {});
+  }
+);
+
+/**
+ * 更新模板映射
+ */
+export const updateTemplateMappings = createAsyncThunk(
+  'templates/updateMappings',
+  async ({ id, mappings }: { id: string; mappings: any[] }) => {
+    await apiPost(`/templates/${id}/mappings`, { mappings });
+    return { id, mappings };
+  }
+);
+
+/**
+ * 回滚模板
+ */
+export const rollbackTemplateAsync = createAsyncThunk(
+  'templates/rollbackTemplate',
+  async ({ id, versionId }: { id: string; versionId: string }) => {
+    await apiPost(`/templates/${id}/rollback/${versionId}`, {});
+    return { id, versionId };
+  }
+);
+
+// ============================================
+// 初始状态（保留本地默认模板作为后备）
+// ============================================
 
 const initialState: TemplatesState = {
   templates: [
@@ -382,6 +495,81 @@ const templatesSlice = createSlice({
       const { id, mapping } = action.payload;
       state.mappings[id] = mapping;
     },
+  },
+  extraReducers: (builder) => {
+    // 获取模板列表
+    builder.addCase(fetchTemplates.pending, (state) => {
+      state.loading = true;
+      state.error = null;
+    });
+    builder.addCase(fetchTemplates.fulfilled, (state, action) => {
+      state.loading = false;
+      if (Array.isArray(action.payload)) {
+        state.templates = action.payload;
+      } else {
+        // 处理分页响应
+        state.templates = action.payload;
+      }
+    });
+    builder.addCase(fetchTemplates.rejected, (state, action) => {
+      state.loading = false;
+      state.error = action.error.message || '获取模板失败';
+    });
+
+    // 获取单个模板
+    builder.addCase(fetchTemplateById.fulfilled, (state, action) => {
+      const idx = state.templates.findIndex(t => t.id === action.payload.id);
+      if (idx >= 0) {
+        state.templates[idx] = action.payload;
+      } else {
+        state.templates.push(action.payload);
+      }
+    });
+
+    // 创建模板
+    builder.addCase(createTemplate.pending, (state) => {
+      state.loading = true;
+    });
+    builder.addCase(createTemplate.fulfilled, (state, action) => {
+      state.loading = false;
+      // 重新获取列表（因为后端返回的可能不是完整的模板对象）
+      // 或者可以手动构造一个临时对象
+    });
+    builder.addCase(createTemplate.rejected, (state, action) => {
+      state.loading = false;
+      state.error = action.error.message || '创建模板失败';
+    });
+
+    // 更新模板
+    builder.addCase(updateTemplateAsync.fulfilled, (state, action) => {
+      const { id, changes } = action.payload;
+      const idx = state.templates.findIndex(t => t.id === id);
+      if (idx >= 0) {
+        state.templates[idx] = { ...state.templates[idx], ...changes, updatedAt: now() };
+      }
+    });
+
+    // 删除模板
+    builder.addCase(deleteTemplateAsync.fulfilled, (state, action) => {
+      state.templates = state.templates.filter(t => t.id !== action.payload);
+    });
+
+    // 获取默认模板
+    builder.addCase(fetchDefaultTemplate.fulfilled, (state, action) => {
+      const template = action.payload;
+      const idx = state.templates.findIndex(t => t.id === template.id);
+      if (idx >= 0) {
+        state.templates[idx] = template;
+      } else {
+        state.templates.push(template);
+      }
+    });
+
+    // 复制模板
+    builder.addCase(copyTemplateAsync.fulfilled, (state) => {
+      // 重新获取列表
+      state.loading = false;
+    });
   },
 });
 

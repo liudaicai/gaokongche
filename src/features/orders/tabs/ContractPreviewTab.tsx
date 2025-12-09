@@ -1,9 +1,12 @@
-import React, { useMemo, useRef } from 'react';
-import { Button, Space, Typography, Card } from 'antd';
-import { useSelector } from 'react-redux';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
+import { Button, Space, Typography, Card, Form, message } from 'antd';
+import { useSelector, useDispatch } from 'react-redux';
+import type { AppDispatch } from '../../../app/store';
 import { Order } from '../types';
 import { useTabs } from '../../common/TabsContext';
-import { selectDefaultTemplate, selectTemplateMapping } from '../../templates/templatesSlice';
+import { fetchDefaultTemplate, selectDefaultTemplate } from '../../templates/templatesSlice';
+import { TemplatePicker } from '../../templates/components';
+import { mapOrderToTemplateData } from '../../templates/templateDataMapper';
 import { renderTemplate, printElement, exportElementAsPdf } from '../../templates/templateEngine';
 
 interface Props {
@@ -14,63 +17,64 @@ interface Props {
 const { Title } = Typography;
 
 const ContractPreviewTab: React.FC<Props> = ({ order, tabKey }) => {
+  const dispatch = useDispatch<AppDispatch>();
   const { closeTab } = useTabs();
   const defaultContractTemplate = useSelector(selectDefaultTemplate('合同'));
-  const mapping = useSelector(defaultContractTemplate ? selectTemplateMapping(defaultContractTemplate.id) : (() => ({})) as any);
   const previewRef = useRef<HTMLDivElement | null>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | number | undefined>(undefined);
 
+  // 加载默认模板
+  useEffect(() => {
+    dispatch(fetchDefaultTemplate('合同'));
+  }, [dispatch]);
+
+  // 当默认模板加载完成时，设置选中的模板
+  useEffect(() => {
+    if (defaultContractTemplate && !selectedTemplateId) {
+      setSelectedTemplateId(defaultContractTemplate.id);
+    }
+  }, [defaultContractTemplate, selectedTemplateId]);
+
+  // 获取当前选中的模板
+  const currentTemplate = useSelector((state: any) => {
+    if (!selectedTemplateId) return null;
+    return state.templates.templates.find((t: any) => t.id === selectedTemplateId);
+  });
+
+  // 使用新的数据映射逻辑
   const previewHtml = useMemo(() => {
-    if (!defaultContractTemplate) {
-      return '<div style="padding:12px; color:#888">尚未设置默认合同模板</div>';
+    if (!currentTemplate) {
+      return '<div style="padding:12px; color:#888">请选择合同模板</div>';
     }
-    // 基础源数据（供路径解析）
-    const source: Record<string, any> = {
-      order,
-      system: { printDate: new Date().toLocaleDateString() },
-    };
-    const getByPath = (obj: any, path: string) => {
-      if (!path) return '';
-      return path.split('.').reduce((acc: any, key: string) => (acc == null ? '' : acc[key]), obj);
-    };
-    // 若存在占位符映射，按映射生成数据对象
-    const mappedData: Record<string, any> = {};
-    Object.entries(mapping || {}).forEach(([k, p]) => {
-      mappedData[k] = getByPath(source, p as string);
-    });
-    // 处理 items 列表：如果映射指定了 items 列表路径，则标准化子项结构
-    let items: any[] = [];
-    if (mappedData.items && Array.isArray(mappedData.items)) {
-      items = (mappedData.items as any[]).map((it: any, idx: number) => ({
-        index: idx + 1,
-        equipment_type: it.equipmentType || it.type || '—',
-        height: it.height || '—',
-        quantity: it.quantity ?? it.count ?? 0,
-        daily_price: (it.dailyRentalPrice ?? it.rentalRateDaily ?? it.dailyPrice ?? '—'),
-        monthly_rate: (it.monthlyRentalRate ?? it.rentalRateMonthly ?? it.monthlyPrice ?? '—'),
-      }));
-      mappedData.items = items;
+
+    // 使用统一的数据映射工具
+    const templateData = mapOrderToTemplateData(order as any, '合同');
+    
+    // 渲染模板
+    return renderTemplate(currentTemplate.content || '', templateData);
+  }, [currentTemplate, order]);
+
+  const handlePrint = () => {
+    if (!previewRef.current) {
+      message.warning('请先加载预览内容');
+      return;
     }
-    // 回退：若未提供映射则使用默认字段构造
-    if (!Object.keys(mappedData).length) {
-      items = (order.equipmentItems || []).map((it: any, idx: number) => ({
-        index: idx + 1,
-        equipment_type: it.equipmentType || '—',
-        height: it.height || '—',
-        quantity: it.quantity || 0,
-        daily_price: (it.dailyRentalPrice ?? it.rentalRateDaily ?? '—'),
-        monthly_rate: (it.monthlyRentalRate ?? it.rentalRateMonthly ?? '—'),
-      }));
-      mappedData.contract_number = (order as any)?.contractNumber || `CN-${Date.now().toString().slice(-6)}`;
-      mappedData.print_date = new Date().toLocaleDateString();
-      mappedData.lessor_name = (order as any)?.vendorName || '惠州振鸿工程机械租赁有限公司';
-      mappedData.lessee_name = order.customerName;
-      mappedData.project_name = order.projectName;
-      mappedData.delivery_location = order.deliveryLocation || order.projectName;
-      mappedData.payment_agreement = (order as any)?.paymentAgreement || (order as any)?.otherAgreements || '按月结算，次月10日前支付上月租金';
-      mappedData.items = items;
+    printElement(previewRef.current);
+  };
+
+  const handleExportPdf = async () => {
+    if (!previewRef.current) {
+      message.warning('请先加载预览内容');
+      return;
     }
-    return renderTemplate(defaultContractTemplate.content || '', mappedData);
-  }, [defaultContractTemplate, order, mapping]);
+    try {
+      const filename = `合同-${order.customerName || 'Contract'}-${Date.now()}.pdf`;
+      await exportElementAsPdf(previewRef.current, filename);
+      message.success('PDF导出成功');
+    } catch (error) {
+      message.error('PDF导出失败');
+    }
+  };
 
   return (
     <div style={{ padding: 16 }}>
@@ -78,10 +82,26 @@ const ContractPreviewTab: React.FC<Props> = ({ order, tabKey }) => {
         <Title level={4} style={{ margin: 0 }}>合同预览</Title>
         <Space>
           <Button onClick={() => closeTab(tabKey)}>返回</Button>
-          <Button type="primary" onClick={() => previewRef.current && printElement(previewRef.current)}>打印</Button>
-          <Button onClick={() => previewRef.current && exportElementAsPdf(previewRef.current, '合同')}>导出PDF</Button>
+          <Button type="primary" onClick={handlePrint}>打印</Button>
+          <Button onClick={handleExportPdf}>导出PDF</Button>
         </Space>
       </div>
+      
+      {/* 模板选择 */}
+      <Card size="small" style={{ marginBottom: 16 }}>
+        <Form layout="inline">
+          <Form.Item label="合同模板">
+            <TemplatePicker
+              type="合同"
+              value={selectedTemplateId}
+              onChange={setSelectedTemplateId}
+              style={{ width: 300 }}
+            />
+          </Form.Item>
+        </Form>
+      </Card>
+
+      {/* 预览区域 */}
       <Card>
         <div ref={previewRef} style={{ background: '#fff', padding: 16 }}>
           <div style={{ border: '1px solid #e8e8e8', padding: 8 }} dangerouslySetInnerHTML={{ __html: previewHtml }} />

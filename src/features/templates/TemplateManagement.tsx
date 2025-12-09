@@ -1,19 +1,56 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Card, Button, Table, Modal, Form, Input, Select, Space, Tag, message, Popconfirm, Upload } from 'antd';
+import { Card, Button, Table, Modal, Form, Input, Select, Space, Tag, message, Popconfirm, Upload, Segmented, Row, Col, Statistic, Tooltip, Divider, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import {
+  AppstoreOutlined,
+  BarsOutlined,
+  PlusOutlined,
+  FileTextOutlined,
+  CheckCircleOutlined,
+  GlobalOutlined,
+  EditOutlined,
+  CopyOutlined,
+  HistoryOutlined,
+  DeleteOutlined,
+  EyeOutlined,
+  SettingOutlined,
+  QuestionCircleOutlined,
+  ImportOutlined,
+  RocketOutlined,
+  StarFilled
+} from '@ant-design/icons';
 import type { AppDispatch, RootState } from '../../app/store';
 import { TEMPLATE_TYPE_OPTIONS, Template, TemplateType } from './types';
-import { addTemplate, addTemplateWithMapping, updateTemplate, deleteTemplate, setDefaultTemplate, selectTemplates, toggleTemplateStatus, copyTemplate, rollbackTemplate } from './templatesSlice';
+import {
+  fetchTemplates,
+  createTemplate,
+  updateTemplateAsync,
+  deleteTemplateAsync,
+  selectTemplates,
+  copyTemplateAsync,
+  rollbackTemplateAsync
+} from './templatesSlice';
+import TemplateWizard from './components/TemplateWizard';
+import QuickReferenceCard from './components/QuickReferenceCard';
+import TemplateCardSelector from './components/TemplateCardSelector';
 
 const { Option } = Select;
+const { Title } = Typography;
 
 const TemplateManagement: React.FC = () => {
   const dispatch = useDispatch<AppDispatch>();
   const templates = useSelector((state: RootState) => selectTemplates(state));
+  const loading = useSelector((state: RootState) => state.templates.loading);
+
+  // 组件加载时获取模板列表
+  useEffect(() => {
+    dispatch(fetchTemplates({}));
+  }, [dispatch]);
 
   // 过滤与UI状态
   const [filterType, setFilterType] = useState<TemplateType | undefined>(undefined);
+  const [viewMode, setViewMode] = useState<'list' | 'card'>('card');
   const [isEditorVisible, setIsEditorVisible] = useState(false);
   const [isPreviewVisible, setIsPreviewVisible] = useState(false);
   const [editing, setEditing] = useState<Template | null>(null);
@@ -28,6 +65,12 @@ const TemplateManagement: React.FC = () => {
   const [importIsDefault, setImportIsDefault] = useState<boolean | undefined>(undefined);
   // 编辑器表单的预填充数据（确保在 Modal 打开且 Form 挂载后再设置字段）
   const [editorSeed, setEditorSeed] = useState<{ name?: string; type?: TemplateType; content?: string; isDefault?: boolean } | null>(null);
+
+  // 向导模式
+  const [isWizardVisible, setIsWizardVisible] = useState(false);
+
+  // 快速参考
+  const [isReferenceVisible, setIsReferenceVisible] = useState(false);
 
   // 提取占位符（包含 each 内部）
   const extractPlaceholders = (content: string): string[] => {
@@ -65,6 +108,14 @@ const TemplateManagement: React.FC = () => {
     return filterType ? templates.filter(t => t.type === filterType) : templates;
   }, [templates, filterType]);
 
+  const stats = useMemo(() => {
+    return {
+      total: templates.length,
+      enabled: templates.filter(t => t.status === 'enabled').length,
+      types: new Set(templates.map(t => t.type)).size
+    };
+  }, [templates]);
+
   const openAdd = () => {
     setEditing(null);
     setEditorSeed(null);
@@ -89,41 +140,69 @@ const TemplateManagement: React.FC = () => {
         name: values.name as string,
         type: values.type as TemplateType,
         content: values.content as string,
+        description: values.description as string || '',
         isDefault: !!values.isDefault,
       };
 
       if (editing) {
-        dispatch(updateTemplate({ id: editing.id, changes: payload }));
+        await dispatch(updateTemplateAsync({ id: editing.id, changes: payload })).unwrap();
         message.success('模板已更新');
+        dispatch(fetchTemplates({}));
       } else {
-        dispatch(addTemplate(payload));
+        await dispatch(createTemplate(payload)).unwrap();
         message.success('模板已新增');
+        dispatch(fetchTemplates({}));
       }
       setIsEditorVisible(false);
-    } catch (err) {
-      // 校验错误由表单控件提示
+    } catch (err: any) {
+      message.error(err.message || '操作失败');
     }
   };
 
-  const handleDelete = (tpl: Template) => {
-    dispatch(deleteTemplate(tpl.id));
-    message.success('模板已删除');
+  const handleDelete = async (tpl: Template) => {
+    try {
+      await dispatch(deleteTemplateAsync(tpl.id)).unwrap();
+      message.success('模板已删除');
+    } catch (err: any) {
+      message.error(err.message || '删除失败');
+    }
   };
 
-  const handleSetDefault = (tpl: Template) => {
-    dispatch(setDefaultTemplate({ type: tpl.type, id: tpl.id }));
-    message.success(`已将「${tpl.name}」设为${tpl.type}默认模板`);
+  const handleSetDefault = async (tpl: Template) => {
+    try {
+      await dispatch(updateTemplateAsync({
+        id: tpl.id,
+        changes: { isDefault: true }
+      })).unwrap();
+      message.success(`已将「${tpl.name}」设为${tpl.type}默认模板`);
+      dispatch(fetchTemplates({}));
+    } catch (err: any) {
+      message.error(err.message || '设置失败');
+    }
   };
 
-  const handleToggleStatus = (tpl: Template) => {
+  const handleToggleStatus = async (tpl: Template) => {
     const next = (tpl.status === 'enabled') ? 'disabled' : 'enabled';
-    dispatch(toggleTemplateStatus({ id: tpl.id, status: next }));
-    message.success(`模板「${tpl.name}」已${next === 'enabled' ? '启用' : '停用'}`);
+    try {
+      await dispatch(updateTemplateAsync({
+        id: tpl.id,
+        changes: { status: next }
+      })).unwrap();
+      message.success(`模板「${tpl.name}」已${next === 'enabled' ? '启用' : '停用'}`);
+      dispatch(fetchTemplates({}));
+    } catch (err: any) {
+      message.error(err.message || '操作失败');
+    }
   };
 
-  const handleCopy = (tpl: Template) => {
-    dispatch(copyTemplate(tpl.id));
-    message.success(`已复制模板「${tpl.name}」`);
+  const handleCopy = async (tpl: Template) => {
+    try {
+      await dispatch(copyTemplateAsync(tpl.id)).unwrap();
+      message.success(`已复制模板「${tpl.name}」`);
+      dispatch(fetchTemplates({}));
+    } catch (err: any) {
+      message.error(err.message || '复制失败');
+    }
   };
 
   const openVersions = (tpl: Template) => {
@@ -131,42 +210,104 @@ const TemplateManagement: React.FC = () => {
     setVersionModalVisible(true);
   };
 
-  const handleRollback = (versionId: string) => {
+  const handleRollback = async (versionId: string) => {
     if (!versionTpl) return;
-    dispatch(rollbackTemplate({ id: versionTpl.id, versionId }));
-    message.success('模板内容已回滚到所选版本');
-    setVersionModalVisible(false);
+    try {
+      await dispatch(rollbackTemplateAsync({ id: versionTpl.id, versionId })).unwrap();
+      message.success('模板内容已回滚到所选版本');
+      setVersionModalVisible(false);
+      dispatch(fetchTemplates({}));
+    } catch (err: any) {
+      message.error(err.message || '回滚失败');
+    }
   };
 
   const columns: ColumnsType<Template> = [
-    { title: '序号', key: 'index', width: 80, render: (_,_r, i) => i + 1 },
-    { title: '模板名称', dataIndex: 'name', key: 'name' },
+    { title: '序号', key: 'index', width: 60, render: (_, _r, i) => i + 1 },
+    {
+      title: '模板名称', dataIndex: 'name', key: 'name', render: (text, record) => (
+        <Space>
+          {text}
+          {record.isDefault && <Tag color="blue">默认</Tag>}
+        </Space>
+      )
+    },
     { title: '单据类型', dataIndex: 'type', key: 'type', filters: TEMPLATE_TYPE_OPTIONS.map(t => ({ text: t, value: t })), onFilter: (value, record) => record.type === value },
-    { title: '默认模板', key: 'isDefault', render: (_, r) => r.isDefault ? <Tag color="blue">默认</Tag> : <Tag>否</Tag> },
-    { title: '状态', key: 'status', render: (_, r) => (r.status === 'enabled' ? <Tag color="green">启用</Tag> : <Tag color="red">停用</Tag>) },
-    { title: '版本数', key: 'versions', render: (_, r) => <span>{(r.versions || []).length}</span> },
-    { title: '更新时间', dataIndex: 'updatedAt', key: 'updatedAt' },
-    { title: '操作', key: 'action', width: 420, render: (_, record) => (
-      <Space wrap>
-        <Button type="link" onClick={() => openPreview(record)}>预览</Button>
-        <Button type="link" onClick={() => handleToggleStatus(record)}>{record.status === 'enabled' ? '停用' : '启用'}</Button>
-        <Button type="link" onClick={() => handleCopy(record)}>复制</Button>
-        <Button type="link" onClick={() => openVersions(record)}>版本历史</Button>
-        {!record.isDefault && (
-          <Button type="link" onClick={() => handleSetDefault(record)}>设为默认</Button>
-        )}
-        <Button type="link" onClick={() => openEdit(record)}>维护</Button>
-        <Popconfirm title="确认删除该模板？" onConfirm={() => handleDelete(record)} okText="删除" cancelText="取消">
-          <Button type="link" danger>删除</Button>
-        </Popconfirm>
-      </Space>
-    )},
+    { title: '状态', key: 'status', width: 100, render: (_, r) => (r.status === 'enabled' ? <Tag color="green">启用</Tag> : <Tag color="red">停用</Tag>) },
+    { title: '版本', key: 'versions', width: 80, render: (_, r) => <span>{(r.versions || []).length}</span> },
+    { title: '更新时间', dataIndex: 'updatedAt', key: 'updatedAt', width: 160, render: (val) => new Date(val).toLocaleDateString() },
+    {
+      title: '操作', key: 'action', width: 300, render: (_, record) => (
+        <Space>
+          <Tooltip title="预览"><Button type="text" icon={<EyeOutlined />} onClick={() => openPreview(record)} /></Tooltip>
+          <Tooltip title="编辑"><Button type="text" icon={<EditOutlined />} onClick={() => openEdit(record)} /></Tooltip>
+          <Tooltip title="复制"><Button type="text" icon={<CopyOutlined />} onClick={() => handleCopy(record)} /></Tooltip>
+          <Tooltip title={record.status === 'enabled' ? '停用' : '启用'}>
+            <Button type="text" onClick={() => handleToggleStatus(record)}>{record.status === 'enabled' ? <Tag color="error">停</Tag> : <Tag color="success">启</Tag>}</Button>
+          </Tooltip>
+          <Popconfirm title="确认删除？" onConfirm={() => handleDelete(record)}>
+            <Button type="text" danger icon={<DeleteOutlined />} />
+          </Popconfirm>
+        </Space>
+      )
+    },
   ];
 
   return (
-    <div style={{ padding: 16 }}>
+    <div style={{ padding: 24, background: '#f0f2f5', minHeight: '100vh' }}>
+      {/* 头部统计与操作区 */}
+      <div style={{ marginBottom: 24 }}>
+        <Row justify="space-between" align="middle" style={{ marginBottom: 16 }}>
+          <Col>
+            <Title level={2} style={{ margin: 0 }}>模板管理系统</Title>
+          </Col>
+          <Col>
+            <Space>
+              <Button type="primary" icon={<RocketOutlined />} onClick={() => setIsWizardVisible(true)} size="large">
+                向导模式创建
+              </Button>
+              <Button icon={<ImportOutlined />} onClick={() => setIsImportVisible(true)}>导入模板</Button>
+              <Button icon={<QuestionCircleOutlined />} onClick={() => setIsReferenceVisible(true)}>使用帮助</Button>
+            </Space>
+          </Col>
+        </Row>
+
+        <Row gutter={16}>
+          <Col span={6}>
+            <Card bordered={false} hoverable>
+              <Statistic title="总模板数" value={stats.total} prefix={<FileTextOutlined />} />
+            </Card>
+          </Col>
+          <Col span={6}>
+            <Card bordered={false} hoverable>
+              <Statistic title="启用中" value={stats.enabled} valueStyle={{ color: '#3f8600' }} prefix={<CheckCircleOutlined />} />
+            </Card>
+          </Col>
+          <Col span={6}>
+            <Card bordered={false} hoverable>
+              <Statistic title="覆盖单据类型" value={stats.types} suffix="/ 6" prefix={<GlobalOutlined />} />
+            </Card>
+          </Col>
+          <Col span={6}>
+            <Card bordered={false} hoverable onClick={openAdd} style={{ cursor: 'pointer', borderColor: '#1677ff', borderStyle: 'dashed' }}>
+              <Statistic title="快速操作" value="新增模板" prefix={<PlusOutlined />} valueStyle={{ fontSize: 18, color: '#1677ff' }} />
+            </Card>
+          </Col>
+        </Row>
+      </div>
+
       <Card
-        title="模板管理"
+        bordered={false}
+        title={
+          <Segmented
+            options={[
+              { label: '卡片视图', value: 'card', icon: <AppstoreOutlined /> },
+              { label: '列表视图', value: 'list', icon: <BarsOutlined /> }
+            ]}
+            value={viewMode}
+            onChange={(val) => setViewMode(val as 'list' | 'card')}
+          />
+        }
         extra={
           <Space>
             <Select
@@ -179,18 +320,39 @@ const TemplateManagement: React.FC = () => {
               {TEMPLATE_TYPE_OPTIONS.map(opt => (
                 <Option key={opt} value={opt}>{opt}</Option>
               ))}
-          </Select>
-            <Button type="primary" onClick={openAdd}>新增模板</Button>
-            <Button onClick={() => setIsImportVisible(true)}>导入模板</Button>
+            </Select>
+            <Button onClick={openAdd} icon={<PlusOutlined />}>高级模式</Button>
           </Space>
         }
       >
-        <Table
-          columns={columns}
-          dataSource={data}
-          rowKey="id"
-          pagination={{ pageSize: 10 }}
-        />
+        {viewMode === 'list' ? (
+          <Table
+            columns={columns}
+            dataSource={data}
+            rowKey="id"
+            loading={loading}
+            pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 条` }}
+          />
+        ) : (
+          <TemplateCardSelector
+            templates={data}
+            onSelect={(t) => openEdit(t)}
+            showPreview={true}
+            onPreview={openPreview}
+            renderActions={(t) => [
+              <Tooltip title="预览"><EyeOutlined key="preview" onClick={(e) => { e.stopPropagation(); openPreview(t); }} /></Tooltip>,
+              <Tooltip title="编辑"><EditOutlined key="edit" onClick={(e) => { e.stopPropagation(); openEdit(t); }} /></Tooltip>,
+              <Tooltip title="设为默认" key="default">
+                {t.isDefault ? <StarFilled style={{ color: '#faad14' }} /> : <StarFilled onClick={(e) => { e.stopPropagation(); handleSetDefault(t); }} />}
+              </Tooltip>,
+              <Tooltip title="更多">
+                <Popconfirm title="确认删除？" onConfirm={(e) => { e?.stopPropagation(); handleDelete(t); }} okText="删除" cancelText="取消">
+                  <DeleteOutlined key="delete" style={{ color: '#ff4d4f' }} onClick={(e) => e.stopPropagation()} />
+                </Popconfirm>
+              </Tooltip>
+            ]}
+          />
+        )}
       </Card>
 
       {/* 新增/维护模板 */}
@@ -215,25 +377,58 @@ const TemplateManagement: React.FC = () => {
         }}
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="name" label="模板名称" rules={[{ required: true, message: '请输入模板名称' }]}>
-            <Input placeholder="例如：标准结算模板（含税）" />
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="name" label="模板名称" rules={[{ required: true, message: '请输入模板名称' }]}>
+                <Input placeholder="例如：标准结算模板（含税）" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="type" label="单据类型" rules={[{ required: true, message: '请选择单据类型' }]}>
+                <Select placeholder="请选择类型">
+                  {TEMPLATE_TYPE_OPTIONS.map(opt => (
+                    <Option key={opt} value={opt}>{opt}</Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item name="content" label={
+            <Space>
+              <span>模板内容（HTML）</span>
+              <Tooltip title="支持 Handlebars 语法，如 {{customer_name}}">
+                <QuestionCircleOutlined />
+              </Tooltip>
+            </Space>
+          } rules={[{ required: true, message: '请输入模板HTML内容' }]}>
+            <Input.TextArea rows={16} placeholder="粘贴或编写HTML模板..." style={{ fontFamily: 'monospace' }} />
           </Form.Item>
-          <Form.Item name="type" label="单据类型" rules={[{ required: true, message: '请选择单据类型' }]}>
-            <Select placeholder="请选择类型">
-              {TEMPLATE_TYPE_OPTIONS.map(opt => (
-                <Option key={opt} value={opt}>{opt}</Option>
-              ))}
-            </Select>
-          </Form.Item>
-          <Form.Item name="content" label="模板内容（HTML）" rules={[{ required: true, message: '请输入模板HTML内容' }]}>
-            <Input.TextArea rows={16} placeholder="粘贴或编写HTML模板，支持占位符，如 {{customer_name}}、{{period_start}} 等" />
-          </Form.Item>
-          <Form.Item name="isDefault" label="设为默认">
-            <Select placeholder="是否设为默认模板" allowClear>
-              <Option value={true}>是</Option>
-              <Option value={false}>否</Option>
-            </Select>
-          </Form.Item>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="isDefault" label="设为默认" initialValue={false}>
+                <Select>
+                  <Option value={true}>是</Option>
+                  <Option value={false}>否</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="description" label="备注说明">
+                <Input placeholder="版本说明等" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          {editing && (
+            <div style={{ marginTop: 16, borderTop: '1px solid #f0f0f0', paddingTop: 16 }}>
+              <Space>
+                <Button icon={<HistoryOutlined />} onClick={() => openVersions(editing)}>查看历史版本</Button>
+                <Button icon={<CopyOutlined />} onClick={() => handleCopy(editing)}>复制此模板</Button>
+              </Space>
+            </div>
+          )}
         </Form>
       </Modal>
 
@@ -245,8 +440,15 @@ const TemplateManagement: React.FC = () => {
         footer={<Button onClick={() => setIsPreviewVisible(false)}>关闭</Button>}
         width={980}
       >
-        <div style={{ background: '#fff', padding: 16 }}>
-          <div style={{ border: '1px solid #e8e8e8', padding: 8 }} dangerouslySetInnerHTML={{ __html: previewContent }} />
+        <div style={{ background: '#f5f5f5', padding: 24, overflow: 'auto', maxHeight: '70vh' }}>
+          <div style={{
+            background: '#fff',
+            padding: '40px',
+            minHeight: 800,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            width: '210mm', // A4 width
+            margin: '0 auto'
+          }} dangerouslySetInnerHTML={{ __html: previewContent }} />
         </div>
       </Modal>
 
@@ -275,14 +477,14 @@ const TemplateManagement: React.FC = () => {
           </Button>,
           <Button
             key="save-map"
-            onClick={() => {
+            onClick={async () => {
               if (!importHtml || !importType) {
                 message.warning('请先选择文件并填写类型');
                 return;
               }
               const placeholders = extractPlaceholders(importHtml);
               const listPaths = extractListPaths(importHtml);
-              const mapping: Record<string, string> = {};
+              const mappings: any[] = [];
               // 针对常见合同占位符的建议映射
               if (importType === '合同') {
                 const suggest: Record<string, string> = {
@@ -296,23 +498,30 @@ const TemplateManagement: React.FC = () => {
                   print_date: 'system.printDate',
                 };
                 placeholders.forEach(k => {
-                  if (suggest[k]) mapping[k] = suggest[k];
+                  if (suggest[k]) {
+                    mappings.push({ placeholder: k, dataPath: suggest[k] });
+                  }
                 });
               }
               // each 列表变量名映射（例如 items -> order.equipmentItems）
               if (listPaths.includes('items')) {
-                mapping['items'] = 'order.equipmentItems';
+                mappings.push({ placeholder: 'items', dataPath: 'order.equipmentItems' });
               }
-              const payload = {
-                name: importName || '导入模板',
-                type: importType,
-                content: importHtml,
-                isDefault: !!importIsDefault,
-                mapping,
-              } as any;
-              dispatch(addTemplateWithMapping(payload));
-              message.success('模板已导入并保存映射');
-              setIsImportVisible(false);
+
+              try {
+                await dispatch(createTemplate({
+                  name: importName || '导入模板',
+                  type: importType,
+                  content: importHtml,
+                  isDefault: !!importIsDefault,
+                  mappings,
+                })).unwrap();
+                message.success('模板已导入并保存映射');
+                setIsImportVisible(false);
+                dispatch(fetchTemplates({}));
+              } catch (err: any) {
+                message.error(err.message || '导入失败');
+              }
             }}
           >
             导入并保存（含映射）
@@ -348,7 +557,6 @@ const TemplateManagement: React.FC = () => {
                 const reader = new FileReader();
                 reader.onload = () => {
                   const text = String(reader.result || '')
-                    // 简单清理：去除可能的meta/doctype（可选）
                     .replace(/<!DOCTYPE[\s\S]*?<body[^>]*>/i, '')
                     .replace(/<\/body>[\s\S]*$/i, '');
                   setImportHtml(text);
@@ -359,7 +567,7 @@ const TemplateManagement: React.FC = () => {
                 reader.readAsText(f, 'utf-8');
               }}
             >
-              <Button>选择文件</Button>
+              <Button icon={<ImportOutlined />}>选择HTML文件</Button>
             </Upload>
           </Form.Item>
           <Form.Item label="选择Word文档（.docx）">
@@ -370,7 +578,6 @@ const TemplateManagement: React.FC = () => {
               onChange={async (info) => {
                 const f = (info.file as any)?.originFileObj as File | undefined || (info.fileList?.[0] as any)?.originFileObj as File | undefined;
                 if (!f) {
-                  message.warning('请选择有效的Word文件');
                   return;
                 }
                 try {
@@ -390,7 +597,7 @@ const TemplateManagement: React.FC = () => {
                 }
               }}
             >
-              <Button>选择Word文件</Button>
+              <Button icon={<FileTextOutlined />}>选择Word文件</Button>
             </Upload>
           </Form.Item>
           <Form.Item label="预览（读取后）">
@@ -420,23 +627,52 @@ const TemplateManagement: React.FC = () => {
               rowKey="id"
               pagination={false}
               columns={[
-                { title: '版本ID', dataIndex: 'id', key: 'id' },
-                { title: '创建时间', dataIndex: 'createdAt', key: 'createdAt' },
+                { title: '版本ID', dataIndex: 'id', key: 'id', width: 100, ellipsis: true },
+                { title: '创建时间', dataIndex: 'createdAt', key: 'createdAt', render: val => new Date(val).toLocaleString() },
                 { title: '备注', dataIndex: 'note', key: 'note' },
-                { title: '操作', key: 'action', render: (_: any, r: any) => (
-                  <Space>
-                    <Popconfirm title="确认回滚到该版本？" onConfirm={() => handleRollback(r.id)} okText="回滚" cancelText="取消">
-                      <Button type="link">回滚到此版本</Button>
-                    </Popconfirm>
-                  </Space>
-                ) }
+                {
+                  title: '操作', key: 'action', render: (_: any, r: any) => (
+                    <Space>
+                      <Popconfirm title="确认回滚到该版本？" onConfirm={() => handleRollback(r.id)} okText="回滚" cancelText="取消">
+                        <Button type="link" size="small">回滚到此版本</Button>
+                      </Popconfirm>
+                    </Space>
+                  )
+                }
               ]}
               dataSource={versionTpl.versions}
             />
           ) : (
-            <div style={{ padding: 16, color: '#888' }}>暂无历史版本</div>
+            <div style={{ padding: 16, color: '#888', textAlign: 'center' }}>暂无历史版本</div>
           )}
         </div>
+      </Modal>
+
+      {/* 向导模式创建 */}
+      <TemplateWizard
+        visible={isWizardVisible}
+        onCancel={() => setIsWizardVisible(false)}
+        onFinish={async (values) => {
+          try {
+            await dispatch(createTemplate(values)).unwrap();
+            message.success('模板创建成功！');
+            setIsWizardVisible(false);
+            dispatch(fetchTemplates({}));
+          } catch (err: any) {
+            message.error(err.message || '创建失败');
+          }
+        }}
+      />
+
+      {/* 快速参考 */}
+      <Modal
+        title="📖 模板系统使用帮助"
+        open={isReferenceVisible}
+        onCancel={() => setIsReferenceVisible(false)}
+        footer={<Button type="primary" onClick={() => setIsReferenceVisible(false)}>关闭</Button>}
+        width={900}
+      >
+        <QuickReferenceCard />
       </Modal>
     </div>
   );
