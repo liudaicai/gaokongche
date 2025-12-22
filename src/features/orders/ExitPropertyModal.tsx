@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Modal, Form, Input, Select, Row, Col, Divider, Typography, message, Upload, Button, Tag } from 'antd';
-import { UploadOutlined } from '@ant-design/icons';
+import { PlusOutlined } from '@ant-design/icons';
 import { useSelector, useDispatch } from 'react-redux';
 import type { AppDispatch, RootState } from '../../app/store';
 import { Order } from './types';
@@ -131,7 +131,7 @@ const ExitPropertyModal: React.FC<ExitPropertyModalProps> = ({ open, order, onCa
         id: Date.now().toString(),
         orderNumber: order.contractNumber,
         logisticsType: values.logisticsType === '我方物流' ? 'own' : 'third',
-        orderType: 'outbound',
+        recordType: 'exit',
         storeId: values.returnStoreId,
         storeName: stores.find(s => s.id === values.returnStoreId)?.name || '',
         amount: values.logisticsType === '第三方物流' ? (Number(values.logisticsCost) || 0) : 0,
@@ -144,9 +144,11 @@ const ExitPropertyModal: React.FC<ExitPropertyModalProps> = ({ open, order, onCa
 
       dispatch(addLedgerItem(ledgerItem));
       
+      // ⚠️ 关键修复：明确保留 equipmentItems，避免后端清空设备需求
       const updatedOrder: any = {
         ...order,
         status: 'exiting' as any,
+        equipmentItems: order.equipmentItems, // 保留原有的设备需求
         exitConfig: {
           exitNumber: values.exitNumber,
           logisticsType: values.logisticsType,
@@ -359,7 +361,7 @@ const ExitPropertyModal: React.FC<ExitPropertyModalProps> = ({ open, order, onCa
                             {selected.map(code => (
                               <Row gutter={8} key={code}>
                                 <Col span={24}>
-                                  <Form.Item label={`设备编码 ${code} 的退场附件`}>
+                                  <Form.Item label={`出厂编号 ${code} 的退场附件`}>
                                     <Upload
                                       fileList={exitAttachmentMap[code] || []}
                                       beforeUpload={() => false}
@@ -378,7 +380,7 @@ const ExitPropertyModal: React.FC<ExitPropertyModalProps> = ({ open, order, onCa
                                         });
                                       })}
                                     >
-                                      <Button icon={<UploadOutlined />}>上传附件</Button>
+                                      <Button icon={<PlusOutlined />}>上传附件</Button>
                                     </Upload>
                                   </Form.Item>
                                 </Col>

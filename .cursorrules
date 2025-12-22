@@ -1,0 +1,210 @@
+# 高空车租赁管理系统 - 开发规范与最佳实践
+
+## 项目概述
+基于 React + Express + MySQL 构建的高空车租赁管理系统，支持设备管理、订单管理、客户管理、物流管理等核心业务功能。
+
+## 技术栈
+- **前端**: React 18+, TypeScript, Vite, Redux Toolkit, Ant Design
+- **后端**: Node.js (Express), MySQL 8.0+
+- **认证**: JWT + bcryptjs
+- **样式**: CSS Modules
+- **日志**: Winston
+- **文件上传**: Multer
+
+## 核心开发规则
+
+### 1. 数据库规范
+- ✅ **仅使用 MySQL**：所有数据库操作必须使用 MySQL，禁止引入 MongoDB 相关代码
+- ✅ **字段存储**: `equipments` 表必须直接存储 brand, type, category, height, model 等字段，不依赖关联查询
+- ✅ **迁移管理**: 所有数据库变更必须通过 `sql/mysql/` 目录下的迁移脚本完成
+- ✅ **命名规范**: 使用 snake_case 命名数据库字段（如 `created_at`, `user_id`）
+- ⚠️ **SQL 兼容性**: 避免使用 MySQL 不支持的语法（如 `ADD COLUMN IF NOT EXISTS`）
+
+### 2. API 路由规范
+- ✅ **统一格式**: API 响应必须使用 `{ ok: boolean, data?: any, error?: string }` 格式
+- ✅ **认证中间件**: 所有业务路由必须使用 `authMiddleware` 保护
+- ✅ **错误处理**: 使用 `asyncHandler` 包装异步路由处理器
+- ✅ **分页支持**: 列表接口返回 `{ ok, data, page, pageSize, total }` 格式
+- ✅ **设备路由**: 使用 `equipments.mysql.js` 作为设备 CRUD 的标准路由（注册在 `/api/equipments` 和 `/api/devices`）
+
+### 3. 前端代码规范
+- ✅ **组件命名**: 使用 PascalCase（如 `EquipmentProfile.tsx`）
+- ✅ **状态管理**: 使用 Redux Toolkit 的 `createSlice` 和 `createAsyncThunk`
+- ✅ **API 调用**: 统一使用 `src/api/client.ts` 中的 `apiGet`, `apiPost`, `apiPut`, `apiDelete`
+- ✅ **类型安全**: 为所有组件 props 和 API 响应定义 TypeScript 类型
+- ✅ **错误处理**: API 调用必须使用 try-catch 并提供用户友好的错误提示
+- ✅ **界面布局**: 所有功能界面应填充整个页面，最大化工作区利用率
+
+### 4. 认证与安全
+- ✅ **Token 存储**: JWT token 存储在 `localStorage` 的 `auth_token` 键中
+- ✅ **请求头**: 所有认证请求必须包含 `Authorization: Bearer <token>` 头
+- ✅ **401 处理**: 收到 401 响应时自动清除认证信息并跳转登录页
+- ✅ **密码加密**: 使用 bcryptjs 进行密码 hash（salt rounds = 10）
+- ✅ **环境变量**: JWT_SECRET 必须至少 32 字符，生产环境必须修改
+
+### 5. 租金计算逻辑
+```javascript
+// 新增订单设备需求租金计算规则：
+if (dailyRate * rentalPeriod > monthlyRate) {
+  // 使用月租价计算
+  if (rentalPeriod <= 30) {
+    rent = monthlyRate; // 第一个月最小为一个月
+  } else {
+    rent = monthlyRate + (monthlyRate / 30) * (rentalPeriod - 30);
+  }
+} else {
+  // 使用日租价
+  rent = dailyRate * rentalPeriod;
+}
+// 其他费用（押金、运费、改装费）按实际金额计算
+```
+
+### 6. 文件结构规范
+```
+src/
+├── features/          # 按业务模块组织
+│   ├── orders/       # 订单管理（包含 pricing.ts 租金计算逻辑）
+│   ├── equipment/    # 设备管理
+│   ├── customers/    # 客户管理
+│   └── ...
+├── api/client.ts     # 统一 API 客户端
+├── app/store.ts      # Redux store 配置
+└── i18n/             # 国际化资源
+
+server/
+├── routes/           # API 路由（*.mysql.js）
+├── middleware/       # 中间件（auth.js, errorHandler.js, security.js）
+└── index.js          # Express 入口点
+```
+
+### 7. 代码质量要求
+- ✅ **无未使用变量**: 清理所有未使用的导入和变量
+- ✅ **错误容错**: 数据库迁移脚本应能容忍重复执行（如字段已存在）
+- ✅ **日志记录**: 使用 Winston 记录关键操作和错误
+- ⚠️ **避免硬编码**: 配置项应从环境变量读取
+- ✅ **代码注释**: 关键业务逻辑必须添加中文注释
+
+### 8. Git 提交规范
+```
+feat: 新增设备档案管理功能
+fix: 修复租金计算逻辑错误
+refactor: 重构订单列表组件
+docs: 更新 API 文档
+style: 代码格式化
+perf: 优化设备列表查询性能
+test: 添加租金计算单元测试
+chore: 更新依赖版本
+```
+
+### 9. 测试要求
+- ✅ **单元测试**: 核心业务逻辑（如 `pricing.ts`）必须编写测试
+- ✅ **API 测试**: 关键接口需要集成测试
+- ✅ **手动测试**: 新功能提交前必须完整测试所有流程
+
+### 10. 部署与运维
+- ✅ **端口配置**: 前端 5173, 后端 3001, MySQL 3306
+- ✅ **环境变量**: 使用 `.env` 文件，生产环境必须修改敏感配置
+- ✅ **数据库迁移**: 部署前执行 `npm run db:migrate`
+- ✅ **健康检查**: 使用 `GET /api/health` 监控服务状态
+
+## 常见问题与解决方案
+
+### Vite 代理配置
+```typescript
+// vite.config.ts
+proxy: {
+  '/api': {
+    target: 'http://127.0.0.1:3001',
+    changeOrigin: true,
+    // 不要 rewrite，保留 /api 前缀
+  }
+}
+```
+
+### 401 认证错误
+1. 检查 `localStorage` 中是否有 `auth_token`
+2. 确认 API 请求包含 `Authorization` 头
+3. 验证 Vite 代理正确转发 `/api` 路径
+4. 检查后端 JWT_SECRET 配置
+
+### 设备字段显示异常
+- 确保 `equipments` 表包含所有必需字段（brand, type, category, height, model）
+- 保存设备时必须从表单值写入数据库，不要依赖关联查询
+- 选择型号后应自动填充所有相关字段
+
+### 数据迁移失败
+- 检查 SQL 语法是否兼容 MySQL 8.0+
+- 避免使用 `IF NOT EXISTS` 在 ALTER TABLE 中
+- 使用迁移脚本的错误容忍机制
+
+## 开发流程
+
+### 启动开发环境
+```bash
+# 1. 启动数据库（确保 MySQL 运行中）
+# 2. 运行数据库迁移
+npm run db:migrate
+
+# 3. 启动后端 API（终端1）
+npm run api
+
+# 4. 启动前端开发服务器（终端2）
+npm run dev
+
+# 5. 访问 http://localhost:5173
+# 默认登录: admin / admin123
+```
+
+### 添加新功能
+1. 在 `src/features/` 创建功能模块
+2. 在 `server/routes/` 添加 API 路由
+3. 如需数据库变更，创建迁移脚本 `sql/mysql/00X_description.sql`
+4. 更新 Redux slice 和组件
+5. 测试完整流程
+6. 提交代码
+
+### 修复问题
+1. 重现问题并确认根本原因
+2. 编写失败的测试用例（如适用）
+3. 修复代码
+4. 验证测试通过
+5. 手动测试相关功能
+6. 提交代码
+
+## 性能优化建议
+- ✅ 使用 React.memo 优化组件渲染
+- ✅ 列表数据使用分页和虚拟滚动
+- ✅ API 响应添加缓存策略
+- ✅ 数据库查询添加适当索引
+- ✅ 图片和文件上传添加大小限制
+
+## 安全检查清单
+- [ ] 所有用户输入经过验证和清理
+- [ ] SQL 查询使用参数化语句（防止注入）
+- [ ] 敏感信息不记录在日志中
+- [ ] CORS 配置仅允许可信域名
+- [ ] 文件上传验证类型和大小
+- [ ] JWT token 设置合理过期时间
+- [ ] 生产环境禁用调试日志
+
+## 禁止事项
+- ❌ 禁止在代码中硬编码密码、密钥等敏感信息
+- ❌ 禁止直接修改数据库表结构（必须通过迁移脚本）
+- ❌ 禁止在前端代码中暴露后端完整错误堆栈
+- ❌ 禁止使用 `any` 类型（除非确实必要）
+- ❌ 禁止提交包含 console.log 的生产代码
+- ❌ 禁止在 Git 仓库中提交 `.env` 文件
+- ❌ 禁止引入 MongoDB 相关依赖和代码
+
+## 代码审查要点
+1. 是否符合 TypeScript 类型规范
+2. 是否处理了所有可能的错误情况
+3. 是否添加了必要的注释
+4. API 响应格式是否统一
+5. 数据库操作是否使用了参数化查询
+6. 是否有潜在的性能问题
+7. 用户体验是否友好
+
+---
+
+**记住**: 保持代码简洁、可维护、安全。遇到问题时先查看日志，理解根本原因后再修复。

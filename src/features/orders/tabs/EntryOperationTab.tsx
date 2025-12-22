@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Form, Input, Select, Row, Col, Divider, Typography, message, Upload, Button, Space, Modal, Tag, DatePicker, Affix } from 'antd';
-import { UploadOutlined } from '@ant-design/icons';
+import { Form, Input, Select, Row, Col, Divider, Typography, message, Upload, Button, Space, Modal, Tag, DatePicker } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
 import { useSelector, useDispatch } from 'react-redux';
 import type { AppDispatch, RootState } from '../../../app/store';
 import { Order, EntryRecord } from '../types';
@@ -9,9 +9,11 @@ import { selectStores as selectStoresFromStore, fetchStores, selectStoresLoading
 import { selectEquipmentList, fetchEquipmentsStart, fetchEquipmentsSuccess, fetchEquipmentsFailure, Equipment } from '../../equipment/equipmentslice';
 import { selectDefaultTemplate } from '../../templates/templatesSlice';
 import { renderTemplate, printElement, exportElementAsPdf } from '../../templates/templateEngine';
-import { addEntry } from '../ordersSlice';
+import { addEntry, updateOrder } from '../ordersSlice';
+import { fetchCustomers } from '../../customers/customerSlice';
 import { apiGet } from '../../../api/client';
 import { useTabs } from '../../common/TabsContext';
+import { FixedFooterButtons } from '../../../components/FixedFooterButtons';
 
 import EquipmentPickerModal from '../components/EquipmentPickerModal';
 import dayjs from 'dayjs';
@@ -65,11 +67,19 @@ const EntryOperationTab: React.FC<Props> = ({ order, tabKey }) => {
     }
   }, [dispatch]);
 
+  // 加载客户列表（仅在为空时触发一次）
+  useEffect(() => {
+    if (!customers || customers.length === 0) {
+      dispatch(fetchCustomers() as any);
+    }
+  }, [dispatch, customers]);
+
   useEffect(() => {
     if (effectiveOrder) {
       form.resetFields();
       setEntryAttachmentMap({});
-      const customer: any = customers.find(c => c.id === effectiveOrder.customerId);
+      // 严格字符串比较查找客户
+      const customer: any = customers.find(c => String(c.id) === String(effectiveOrder.customerId));
       const defaultName: string = customer
         ? (customer.type === 'enterprise'
             ? ((customer.contacts || []).map((ct: any) => ct.name).find((n: string) => !!n) || customer.companyName || effectiveOrder.customerName)
@@ -205,26 +215,29 @@ const EntryOperationTab: React.FC<Props> = ({ order, tabKey }) => {
     let mounted = true;
     (async () => {
       try {
-        if (order && (!order.equipmentItems || order.equipmentItems.length === 0)) {
+        if (order && order.id) {
+          // 总是重新加载完整订单详情，确保获取最新的 equipmentItems
           const detail: any = await apiGet<any>(`/orders/${order.id}`);
           if (mounted) {
-            const items = detail?.equipmentItems || [];
-            setEffectiveOrder({ ...order, equipmentItems: items });
+            const items = detail?.equipmentItems || order.equipmentItems || [];
+            const updatedOrder = { ...order, ...detail, equipmentItems: items };
+            setEffectiveOrder(updatedOrder);
             const v = form.getFieldsValue(true) as any;
             const curSelections: string[][] = v.equipmentSelections || [];
             if ((curSelections?.length || 0) !== items.length) {
               form.setFieldsValue({ equipmentSelections: (items || []).map(() => []) });
             }
           }
-        } else {
-          setEffectiveOrder(order);
         }
       } catch (e) {
         // 保守处理：不影响页面，其它逻辑可继续使用基础订单字段
+        if (order) {
+          setEffectiveOrder(order);
+        }
       }
     })();
     return () => { mounted = false; };
-  }, [order, form]);
+  }, [order.id, form])
 
   const handleCompanyChange = (companyId: string) => {
     const company = companies.find(c => c.id === companyId);
@@ -270,6 +283,24 @@ const EntryOperationTab: React.FC<Props> = ({ order, tabKey }) => {
           attachmentsMap[code] = files.map((f: any) => ({ uid: f.uid, name: f.name, type: f.type, size: f.size }));
         });
 
+        // 🆕 识别替代设备（高度高于需求的设备）
+        const substituteEquipments: Record<string, { requiredHeight: number; actualHeight: number }> = {};
+        items.forEach((item, idx) => {
+          const chosen = selections?.[idx] || [];
+          const requiredHeight = Number(item.height);
+          chosen.forEach(code => {
+            const equipment = equipmentList.find(e => e.code === code);
+            if (equipment) {
+              const actualHeight = Number(equipment.height);
+              // 如果实际高度大于需求高度，标记为替代设备
+              if (actualHeight > requiredHeight) {
+                substituteEquipments[code] = { requiredHeight, actualHeight };
+              }
+            }
+          });
+        });
+        console.log('[进场] 识别到的替代设备:', substituteEquipments);
+
         // 生成进场记录 equipmentSummary（格式：设备类型/高度/数量台；…）
         const equipmentSummaryParts: string[] = items.map((it, idx) => {
           const chosen = selections?.[idx] || [];
@@ -297,6 +328,10 @@ const EntryOperationTab: React.FC<Props> = ({ order, tabKey }) => {
           businessManagerName: effectiveOrder.businessManagerName,
           handoverPerson: values.handoverPerson,
           attachments: recordAttachments.length > 0 ? recordAttachments : undefined,
+          // 🆕 替代设备信息
+          substituteEquipments: Object.keys(substituteEquipments).length > 0 ? substituteEquipments : undefined,
+          // 新增：门店信息（出库门店）
+          storeId: values.storeId,
           // 新增：物流关联与展示字段
           vehicleId: logisticsType === '我方物流' ? values.vehicleId : undefined,
           driverId: logisticsType === '我方物流' ? values.driverId : undefined,
@@ -316,29 +351,47 @@ const EntryOperationTab: React.FC<Props> = ({ order, tabKey }) => {
         // 使用专用接口新增进场记录，避免整单更新覆盖已有记录
         await dispatch(addEntry({ orderId: String(effectiveOrder.id), record: enrichedRecord })).unwrap();
 
-        // 新增：记录物流台账（我方物流/第三方物流）
-        const lt: LogisticsUIType = values.logisticsType;
-        if (lt !== '客户自提') {
-          const store = stores.find(s => s.id === values.storeId);
-          const storeName = store?.name || '—';
-          const vehicle = vehicles.find(v => v.id === values.vehicleId);
-          const driver = drivers.find(d => d.id === values.driverId);
-          const company = companies.find(c => c.id === values.companyId);
-          const ledgerItem: LogisticsLedgerItem = {
-            id: Date.now().toString(),
-            orderNumber: values.entryNumber,
-            logisticsType: lt === '我方物流' ? 'own' : 'third',
-            orderType: 'inbound',
-            storeId: values.storeId,
-            storeName,
-            amount: lt === '第三方物流' ? (Number(values.logisticsCost) || 0) : 0,
-            date: new Date().toISOString(),
-            vehicleInfo: lt === '我方物流' ? [vehicle?.plateNumber, vehicle?.spec].filter(Boolean).join(' ') || undefined : undefined,
-            driverInfo: lt === '我方物流' ? [driver?.name, driver?.phone].filter(Boolean).join('/') || undefined : undefined,
-            companyInfo: lt === '第三方物流' ? (company ? `${company.name} (${company.contactPerson}/${company.contactPhone})` : undefined) : undefined
-          };
-          dispatch(addLedgerItem(ledgerItem));
-        }
+        // ⚠️ 关键修复：更新订单的在租设备列表（rentedEquipmentIds）
+        const prevRented = effectiveOrder?.rentedEquipmentIds || [];
+        const currentRentedSet = new Set((prevRented || []).flat());
+        // 将本次进场的设备添加到在租列表
+        selectedCodes.forEach(code => currentRentedSet.add(code));
+        // 将Set转换回数组格式（按设备需求项分组）
+        const updatedRented: string[][] = [];
+        items.forEach((item, idx) => {
+          const itemRented: string[] = [];
+          const prevItemRented = prevRented[idx] || [];
+          // 保留原有的在租设备
+          prevItemRented.forEach(code => {
+            if (currentRentedSet.has(code)) {
+              itemRented.push(code);
+            }
+          });
+          // 添加本次新进场的设备（如果属于当前需求项）
+          const currentSelections = selections[idx] || [];
+          currentSelections.forEach(code => {
+            if (!itemRented.includes(code)) {
+              itemRented.push(code);
+            }
+          });
+          updatedRented.push(itemRented);
+        });
+        
+        // 更新订单的在租设备列表和进场附件
+        // ⚠️ 关键修复：必须保留 equipmentItems，否则后端会清空设备需求
+        const updatedBase = {
+          ...effectiveOrder,
+          rentedEquipmentIds: updatedRented,
+          entryAttachments: { ...(effectiveOrder.entryAttachments || {}), ...attachmentsMap },
+          equipmentItems: effectiveOrder.equipmentItems, // 保留原有的设备需求
+          entries: undefined, // 不传entries，避免后端清空重建
+          exits: undefined,   // 不传exits，避免后端清空重建
+        } as any;
+        await dispatch(updateOrder(updatedBase)).unwrap();
+        console.log('✅ 订单在租设备列表已更新:', updatedRented);
+
+        // ℹ️ 物流台账由后端自动创建，无需前端重复创建
+        console.log('✅ 进场记录创建完成，物流台账由后端自动生成');
       }
 
       message.success('进场属性配置已保存');
@@ -416,39 +469,55 @@ const EntryOperationTab: React.FC<Props> = ({ order, tabKey }) => {
 
   const renderLogisticsFields = () => {
     const logisticsType: LogisticsUIType = form.getFieldValue('logisticsType');
-    if (logisticsType === '客户自提') return null;
+    
+    // 客户自提 - 不显示任何物流字段
+    if (logisticsType === '客户自提') {
+      return null;
+    }
+    
+    // 我方物流
     if (logisticsType === '我方物流') {
       return (
-        <Row gutter={16}>
-          <Col span={12}>
-            <Form.Item name="vehicleId" label="物流车辆" 
-              rules={[{ required: true, message: '请选择物流车辆' }, { validator: async (_,_val) => { const val = form.getFieldValue('vehicleId'); if (!val) return Promise.resolve(); return vehicles.find(v => v.id === val) ? Promise.resolve() : Promise.reject(new Error('选择的车辆不存在')); } }]} 
-              validateStatus={logisticsError ? 'error' : undefined} help={logisticsError || undefined}>
-              <Select placeholder="请选择车辆（车牌号）" 
-                      loading={logisticsLoading} showSearch allowClear optionFilterProp="children" 
-                      notFoundContent={logisticsLoading ? '加载中...' : '暂无车辆'}>
-                {vehicles.map(v => (
-                  <Select.Option key={v.id} value={v.id}>{v.plateNumber}</Select.Option>
-                ))}
-              </Select>
-            </Form.Item>
-          </Col>
-          <Col span={12}>
-            <Form.Item name="driverId" label="司机姓名/电话" 
-              rules={[{ required: true, message: '请选择司机' }, { validator: async (_,_val) => { const val = form.getFieldValue('driverId'); if (!val) return Promise.resolve(); return drivers.find(d => d.id === val) ? Promise.resolve() : Promise.reject(new Error('选择的司机不存在')); } }]} 
-              validateStatus={logisticsError ? 'error' : undefined} help={logisticsError || undefined}>
-              <Select placeholder="请选择司机" 
-                      loading={logisticsLoading} showSearch allowClear optionFilterProp="children" 
-                      notFoundContent={logisticsLoading ? '加载中...' : '暂无司机'}>
-                {drivers.map(d => (
-                  <Select.Option key={d.id} value={d.id}>{`${d.name} / ${d.phone}`}</Select.Option>
-                ))}
-              </Select>
-            </Form.Item>
-          </Col>
-        </Row>
+        <React.Fragment>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="vehicleId" label="物流车辆" 
+                rules={[{ required: true, message: '请选择物流车辆' }, { validator: async (_,_val) => { const val = form.getFieldValue('vehicleId'); if (!val) return Promise.resolve(); return vehicles.find(v => v.id === val) ? Promise.resolve() : Promise.reject(new Error('选择的车辆不存在')); } }]} 
+                validateStatus={logisticsError ? 'error' : undefined} help={logisticsError || undefined}>
+                <Select placeholder="请选择车辆（车牌号）" 
+                        loading={logisticsLoading} showSearch allowClear optionFilterProp="children" 
+                        notFoundContent={logisticsLoading ? '加载中...' : '暂无车辆'}>
+                  {vehicles.map(v => (
+                    <Select.Option key={v.id} value={v.id}>{v.plateNumber}</Select.Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="driverId" label="司机姓名/电话" 
+                rules={[{ required: true, message: '请选择司机' }, { validator: async (_,_val) => { const val = form.getFieldValue('driverId'); if (!val) return Promise.resolve(); return drivers.find(d => d.id === val) ? Promise.resolve() : Promise.reject(new Error('选择的司机不存在')); } }]} 
+                validateStatus={logisticsError ? 'error' : undefined} help={logisticsError || undefined}>
+                <Select placeholder="请选择司机" 
+                        loading={logisticsLoading} showSearch allowClear optionFilterProp="children" 
+                        notFoundContent={logisticsLoading ? '加载中...' : '暂无司机'}>
+                  {drivers.map(d => (
+                    <Select.Option key={d.id} value={d.id}>{`${d.name} / ${d.phone}`}</Select.Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="logisticsCost" label="物流成本"> 
+                <Input placeholder="请输入物流成本（选填）" type="number" />
+              </Form.Item>
+            </Col>
+          </Row>
+        </React.Fragment>
       );
     }
+    
     // 第三方物流
     return (
       <React.Fragment>
@@ -482,7 +551,7 @@ const EntryOperationTab: React.FC<Props> = ({ order, tabKey }) => {
         <Row gutter={16}>
           <Col span={12}>
             <Form.Item name="logisticsCost" label="物流成本" rules={[{ required: true, message: '请输入物流成本' }]}> 
-              <Input placeholder="请输入物流成本" />
+              <Input placeholder="请输入物流成本" type="number" />
             </Form.Item>
           </Col>
         </Row>
@@ -491,7 +560,7 @@ const EntryOperationTab: React.FC<Props> = ({ order, tabKey }) => {
   };
 
   return (
-    <div style={{ padding: 16 }}>
+    <div style={{ padding: 16 }} className="page-with-fixed-footer">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Typography.Title level={4} style={{ margin: 0 }}>进场属性配置</Typography.Title>
       </div>
@@ -620,55 +689,63 @@ const EntryOperationTab: React.FC<Props> = ({ order, tabKey }) => {
                     {() => {
                       const selected: string[] = form.getFieldValue(["equipmentSelections", index]) || [];
                       return (
-                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                          <Button type="primary" onClick={() => setPickerState({ open: true, index, item, initialCodes: selected })}>
-                            选择设备
-                          </Button>
-                          <Text type="secondary">已选 {selected.length}/{item.quantity} 台</Text>
+                        <div>
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <Button type="primary" onClick={() => setPickerState({ open: true, index, item, initialCodes: selected })}>
+                              选择设备
+                            </Button>
+                            <Text type="secondary">已选 {selected.length}/{item.quantity} 台</Text>
+                            {selected.length > 0 && (
+                              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                {selected.slice(0, 5).map(code => {
+                                  // 优先显示自编号
+                                  const eq = equipmentList.find(e => e.code === code);
+                                  const displayCode = eq?.customCode || code;
+                                  return <Tag key={code}>{displayCode}</Tag>;
+                                })}
+                                {selected.length > 5 ? <Text>等 {selected.length} 台</Text> : null}
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* 每个设备单独上传附件 */}
                           {selected.length > 0 && (
-                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                              {selected.slice(0, 5).map(code => <Tag key={code}>{code}</Tag>)}
-                              {selected.length > 5 ? <Text>等 {selected.length} 台</Text> : null}
+                            <div style={{ marginTop: 16 }}>
+                              <Divider orientation="left" style={{ fontSize: 14 }}>设备附件上传</Divider>
+                              {selected.map(code => {
+                                const eq = equipmentList.find(e => e.code === code);
+                                const displayCode = eq?.customCode || code;
+                                return (
+                                  <Row gutter={8} key={code} style={{ marginBottom: 12 }}>
+                                    <Col span={24}>
+                                      <Form.Item label={`设备编号 ${displayCode} 的进场附件`}>
+                                        <Upload
+                                          fileList={entryAttachmentMap[code] || []}
+                                          beforeUpload={() => false}
+                                          onChange={({ fileList }) => setEntryAttachmentMap(prev => ({ ...prev, [code]: fileList }))}
+                                          accept=".jpg,.jpeg,.png,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip"
+                                          listType="text"
+                                          onRemove={(file) => new Promise((resolve) => {
+                                            Modal.confirm({
+                                              title: '确认删除该附件？',
+                                              content: `附件 ${file.name || ''} 将被移除。`,
+                                              okText: '删除',
+                                              cancelText: '取消',
+                                              okButtonProps: { danger: true },
+                                              onOk: () => resolve(true),
+                                              onCancel: () => resolve(false),
+                                            });
+                                          })}
+                                        >
+                                          <Button icon={<PlusOutlined />}>上传附件</Button>
+                                        </Upload>
+                                      </Form.Item>
+                                    </Col>
+                                  </Row>
+                                );
+                              })}
                             </div>
                           )}
-                          <Button onClick={() => {
-                            Modal.confirm({
-                              title: '确认清空已选设备？',
-                              content: '清空后需要重新选择设备。',
-                              okText: '清空',
-                              cancelText: '取消',
-                              okButtonProps: { danger: true },
-                              onOk: () => {
-                                const current = form.getFieldValue('equipmentSelections') || [];
-                                const next = [...current];
-                                next[index] = [];
-                                form.setFieldsValue({ equipmentSelections: next });
-                              },
-                            });
-                          }}>清空选择</Button>
-                          <Upload
-                            multiple
-                            beforeUpload={() => false}
-                            listType="text"
-                            onChange={({ fileList }) => {
-                              const currentMap = { ...entryAttachmentMap };
-                              currentMap[item.id] = (fileList || []).map((f: any) => ({ uid: f.uid, name: f.name, type: f.type, size: f.size }));
-                              setEntryAttachmentMap(currentMap);
-                            }}
-                            onRemove={(file) => new Promise((resolve) => {
-                              Modal.confirm({
-                                title: '确认删除该附件？',
-                                content: `附件 ${file.name || ''} 将被移除。`,
-                                okText: '删除',
-                                cancelText: '取消',
-                                okButtonProps: { danger: true },
-                                onOk: () => resolve(true),
-                                onCancel: () => resolve(false),
-                              });
-                            })}
-                          >
-                            <Button icon={<UploadOutlined />}>上传附件（与本次设备选择关联）</Button>
-                          </Upload>
                         </div>
                       );
                     }}
@@ -678,65 +755,56 @@ const EntryOperationTab: React.FC<Props> = ({ order, tabKey }) => {
             </Row>
           ))}
 
-          {/* 设备选择器模态框（过滤订单已在租与其他项已选的设备） */}
-          {pickerState && (() => {
-            const alreadyRentedCodes: string[] = (effectiveOrder?.rentedEquipmentIds || []).flat();
-            const allSelections: string[][] = form.getFieldValue('equipmentSelections') || [];
-            const otherSelectedCodes: string[] = (allSelections || [])
-              .filter((_, i) => i !== pickerState.index)
-              .flat();
-            const allowSet = new Set(pickerState.initialCodes || []);
-            const excludeSet = new Set<string>([...alreadyRentedCodes, ...otherSelectedCodes]);
-            const filteredEquipmentList = (equipmentList || []).filter(e => !excludeSet.has(e.code) || allowSet.has(e.code));
-
-            return (
-              <EquipmentPickerModal
-                open={pickerState.open}
-                item={pickerState.item}
-                equipmentList={filteredEquipmentList}
-                initialSelectedCodes={pickerState.initialCodes}
-                onlyWaitingDefault={true}
-                storeList={(stores || []).map((s: any) => ({ id: s.id, name: s.name }))}
-                defaultStoreIds={(function(){ const sid = form.getFieldValue('storeId'); return sid ? [sid] : []; })()}
-                onCancel={() => setPickerState(null)}
-                onConfirm={(codes) => {
-                  const current = form.getFieldValue('equipmentSelections') || [];
-                  const next = [...current];
-                  next[pickerState.index] = codes;
-                  form.setFieldsValue({ equipmentSelections: next });
-                  setPickerState(null);
-                }}
-              />
-            );
-          })()}
-
-          {/* 模板预览 */}
-          <Modal open={previewVisible} onCancel={() => setPreviewVisible(false)} width={1000} footer={null}>
-            <div ref={previewRef} dangerouslySetInnerHTML={{ __html: previewHtml }} />
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16, gap: 8 }}>
-              <Button onClick={() => { const el = previewRef.current; if (!el) { message.warning('暂无预览内容'); return; } printElement(el); }}>打印</Button>
-              <Button onClick={() => { const el = previewRef.current; if (!el) { message.warning('暂无预览内容'); return; } exportElementAsPdf(el, `进场单_${entryNumber}.pdf`); }}>导出PDF</Button>
-            </div>
-          </Modal>
           </React.Fragment>
         )}
       </Form>
-      <Affix offsetBottom={0}>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'center',
-            gap: 8,
-            padding: '12px 16px',
-            background: '#fff',
-            borderTop: '1px solid #f0f0f0',
-          }}
-        >
-          <Button onClick={() => closeTab(tabKey)}>返回</Button>
-          <Button onClick={openPreview} disabled={!order}>预览</Button>
-          <Button type="primary" onClick={handleSave} disabled={!order}>保存</Button>
+      
+      {/* 设备选择器模态框（过滤订单已在租与其他项已选的设备） */}
+      {pickerState && (() => {
+        const alreadyRentedCodes: string[] = (effectiveOrder?.rentedEquipmentIds || []).flat();
+        const allSelections: string[][] = form.getFieldValue('equipmentSelections') || [];
+        const otherSelectedCodes: string[] = (allSelections || [])
+          .filter((_, i) => i !== pickerState.index)
+          .flat();
+        const allowSet = new Set(pickerState.initialCodes || []);
+        const excludeSet = new Set<string>([...alreadyRentedCodes, ...otherSelectedCodes]);
+        const filteredEquipmentList = (equipmentList || []).filter(e => !excludeSet.has(e.code) || allowSet.has(e.code));
+
+        return (
+          <EquipmentPickerModal
+            open={pickerState.open}
+            item={pickerState.item}
+            equipmentList={filteredEquipmentList}
+            initialSelectedCodes={pickerState.initialCodes}
+            onlyWaitingDefault={true}
+            storeList={(stores || []).map((s: any) => ({ id: s.id, name: s.name }))}
+            defaultStoreIds={(function(){ const sid = form.getFieldValue('storeId'); return sid ? [sid] : []; })()}
+            onCancel={() => setPickerState(null)}
+            onConfirm={(codes) => {
+              const current = form.getFieldValue('equipmentSelections') || [];
+              const next = [...current];
+              next[pickerState.index] = codes;
+              form.setFieldsValue({ equipmentSelections: next });
+              setPickerState(null);
+            }}
+          />
+        );
+      })()}
+
+      {/* 模板预览 */}
+      <Modal open={previewVisible} onCancel={() => setPreviewVisible(false)} width={1000} footer={null}>
+        <div ref={previewRef} dangerouslySetInnerHTML={{ __html: previewHtml }} />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16, gap: 8 }}>
+          <Button onClick={() => { const el = previewRef.current; if (!el) { message.warning('暂无预览内容'); return; } printElement(el); }}>打印</Button>
+          <Button onClick={() => { const el = previewRef.current; if (!el) { message.warning('暂无预览内容'); return; } exportElementAsPdf(el, `进场单_${entryNumber}.pdf`); }}>导出PDF</Button>
         </div>
-      </Affix>
+      </Modal>
+      
+      <FixedFooterButtons>
+        <Button onClick={() => closeTab(tabKey)}>返回</Button>
+        <Button onClick={openPreview} disabled={!order}>预览</Button>
+        <Button type="primary" onClick={handleSave} disabled={!order}>保存</Button>
+      </FixedFooterButtons>
     </div>
   );
 };

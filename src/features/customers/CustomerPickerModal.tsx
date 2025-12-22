@@ -50,10 +50,14 @@ const CustomerPickerModal: React.FC<CustomerPickerModalProps> = ({ visible, onCa
       render: (_, record) => getDisplayName(record),
     },
     {
-      title: '类型',
+      title: '客户类型',
       dataIndex: 'type',
       width: 100,
-      render: (t) => <Tag color={t === 'enterprise' ? 'blue' : 'green'}>{t === 'enterprise' ? '企业' : '个人'}</Tag>,
+      render: (type: string) => (
+        <Tag color={type === 'personal' ? 'blue' : 'green'}>
+          {type === 'personal' ? '个人客户' : '企业客户'}
+        </Tag>
+      ),
     },
     {
       title: '电话',

@@ -1,6 +1,6 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
-import { API_BASE } from '../../api/client';
-import { Order, OrdersState, OrderFormData, OrderEquipmentItem, ReceiptRecord, RefundRecord, SuspensionRecord, ClaimRecord, SettlementRecord, ClearanceRecord } from './types';
+import { apiGet, apiPost, apiPut, apiDelete } from '../../api/client';
+import { Order, OrdersState, OrderFormData, OrderEquipmentItem } from './types';
 import { calculateOrderEstimatedAmount } from './pricing';
 
 // 模块级工具函数：规范化在租设备ID二维数组结构
@@ -10,36 +10,30 @@ const normalizeRented = (r: any): string[][] | undefined => {
   return r as string[][];
 };
 
-// 初始状态
-const initialState: OrdersState = {
-  orders: [],
-  loading: false,
-  error: null,
-  selectedOrder: null,
-  detailsById: {},
-  detailsLoadingById: {}
-};
-
 // 异步Thunks
 export const fetchOrders = createAsyncThunk(
   'orders/fetchOrders',
   async (_, { rejectWithValue }) => {
     try {
-      const resp = await fetch(`${API_BASE}/orders`, { headers: { 'Content-Type': 'application/json' } });
-      const json = await resp.json();
-      if (!resp.ok || json?.ok === false) {
-        throw new Error(json?.error || '获取订单列表失败');
-      }
+      const response = await apiGet<any[]>('/orders');
+      console.log('[OrdersSlice] API response:', response);
       const toYMD = (x: any): string => {
         if (!x) return '';
         if (typeof x === 'string') return x.slice(0, 10);
         try { return x.toISOString().slice(0, 10); } catch (_) { return String(x).slice(0, 10); }
       };
-      const data = (json?.data || []) as any[];
-      const orders: Order[] = data.map((o) => ({
+      // apiGet 会直接返回 data 数组，而不是完整的响应对象
+      const data = Array.isArray(response) ? response : ((response as any)?.data || []) as any[];
+      console.log('[OrdersSlice] Orders data from API:', data);
+      if (!Array.isArray(data)) {
+        console.error('[OrdersSlice] Data is not an array:', data);
+        return rejectWithValue('订单数据格式错误');
+      }
+      const orders: Order[] = data.map((o: any) => ({
         id: String(o.id ?? ''),
         contractNumber: o.contract_number ?? '',
         lessorId: o.lessor_id ? String(o.lessor_id) : '',
+        lessorCompanyId: o.lessor_company_id ? String(o.lessor_company_id) : '',  // 添加对 lessor_company_id 的支持
         lessorName: o.lessor_name ?? o.vendor_name ?? '',
         customerId: o.customer_id ? String(o.customer_id) : '',
         customerName: o.customer_name ?? '',
@@ -55,7 +49,21 @@ export const fetchOrders = createAsyncThunk(
         constructionCategory: o.construction_category ?? '其他',
         deliveryLocation: o.delivery_location ?? '',
         otherAgreements: o.other_agreements ?? '',
-        equipmentItems: [],
+        equipmentItems: (o.equipmentItems || o.equipment_items || []).map((it: any) => ({
+          id: String(it.id ?? ''),
+          equipmentType: it.equipmentType ?? it.equipment_type ?? '',
+          height: it.height ?? '',
+          quantity: Number(it.quantity ?? 0),
+          dailyRate: Number(it.dailyRate ?? it.daily_rate ?? 0),
+          monthlyRate: Number(it.monthlyRate ?? it.monthly_rate ?? 0),
+          deposit: Number(it.deposit ?? 0),
+          shippingFee: Number(it.shippingFee ?? it.shipping_fee ?? 0),
+          modificationFee: Number(it.modificationFee ?? it.modification_fee ?? 0),
+          scheduledEntryDate: it.scheduledEntryDate ?? it.scheduled_entry_date ?? '',
+          estimatedExitDate: it.estimatedExitDate ?? it.estimated_exit_date ?? '',
+          rentalPeriod: Number(it.rentalPeriod ?? it.rental_period ?? 0),
+          shippingType: it.shippingType ?? it.shipping_type ?? '双程',
+        })),
         rentedEquipmentIds: normalizeRented(o.rentedEquipmentIds ?? o.rented_equipment_ids),
         estimatedAmount: Number(o.estimated_amount ?? 0),
         receipts: undefined,
@@ -76,86 +84,11 @@ export const fetchOrders = createAsyncThunk(
         },
         creationDate: toYMD(o.createdAt ?? new Date()),
       }));
+      console.log('[OrdersSlice] Processed orders:', orders);
       return orders;
     } catch (error) {
+      console.error('[OrdersSlice] Fetch orders error:', error);
       return rejectWithValue('获取订单列表失败');
-    }
-  }
-);
-
-export const fetchOrderById = createAsyncThunk(
-  'orders/fetchOrderById',
-  async (orderId: string, { rejectWithValue }) => {
-    try {
-      const resp = await fetch(`${API_BASE}/orders/${orderId}`, { headers: { 'Content-Type': 'application/json' } });
-      const json = await resp.json();
-      if (!resp.ok || json?.ok === false) {
-        throw new Error(json?.error || '获取订单详情失败');
-      }
-      const d = json.data || {};
-      const toYMD = (x: any): string => {
-        if (!x) return '';
-        if (typeof x === 'string') return x.slice(0, 10);
-        try { return x.toISOString().slice(0, 10); } catch (_) { return String(x).slice(0, 10); }
-      };
-      const order: Order = {
-        id: String(d.id ?? orderId),
-        contractNumber: d.contract_number ?? '',
-        lessorId: d.lessor_id ? String(d.lessor_id) : '',
-        lessorName: d.lessor_name ?? d.vendor_name ?? '',
-        customerId: d.customer_id ? String(d.customer_id) : '',
-        customerName: d.customer_name ?? '',
-        projectName: d.project_name ?? '',
-        businessManagerId: d.business_manager_id ? String(d.business_manager_id) : '',
-        businessManagerName: d.business_manager_name ?? '',
-        monthCalculationMethod: d.month_calculation_method ?? '30天为一月',
-        paymentAgreement: d.payment_agreement ?? '预付',
-        shippingFeeReduction: d.shipping_fee_reduction ?? '无减免',
-        shippingFeeCalculation: d.shipping_fee_calculation ?? '按台计费',
-        isTaxInvoice: d.is_tax_invoice ?? '不开票',
-        invoiceTaxRate: d.invoice_tax_rate ?? undefined,
-        constructionCategory: d.construction_category ?? '其他',
-        deliveryLocation: d.delivery_location ?? '',
-        otherAgreements: d.other_agreements ?? '',
-        equipmentItems: (d.equipmentItems || d.equipment_items || []).map((it: any) => ({
-          id: String(it.id ?? ''),
-          equipmentType: it.equipmentType ?? it.equipment_type ?? '',
-          height: it.height ?? '',
-          quantity: Number(it.quantity ?? 0),
-          dailyRate: Number(it.dailyRate ?? it.daily_rate ?? 0),
-          monthlyRate: Number(it.monthlyRate ?? it.monthly_rate ?? 0),
-          deposit: Number(it.deposit ?? 0),
-          shippingFee: Number(it.shippingFee ?? it.shipping_fee ?? 0),
-          modificationFee: Number(it.modificationFee ?? it.modification_fee ?? 0),
-          scheduledEntryDate: it.scheduledEntryDate ?? it.scheduled_entry_date ?? '',
-          estimatedExitDate: it.estimatedExitDate ?? it.estimated_exit_date ?? '',
-          rentalPeriod: Number(it.rentalPeriod ?? it.rental_period ?? 0),
-          shippingType: it.shippingType ?? (it.shipping_type ? (String(it.shipping_type) === '单程' ? '单程' : '双程') : '双程'),
-        })),
-        rentedEquipmentIds: d.rentedEquipmentIds as string[][] | undefined,
-        estimatedAmount: Number(d.estimated_amount ?? 0),
-        receipts: d.receipts ?? undefined,
-        refunds: d.refunds ?? undefined,
-        suspensions: d.suspensions ?? undefined,
-        claims: d.claims ?? undefined,
-        settlements: d.settlements ?? undefined,
-        clearances: d.clearances ?? undefined,
-        archivedAt: undefined,
-        entryAttachments: d.entryAttachments ?? undefined,
-        exitAttachments: d.exitAttachments ?? undefined,
-        entries: d.entries ?? undefined,
-        exits: d.exits ?? undefined,
-        status: {
-          entryCount: Number(d.status?.entryCount ?? 0),
-          exitCount: Number(d.status?.exitCount ?? 0),
-          performanceStatus: d.status?.performanceStatus ?? '履约',
-          actualReceivedAmount: Number(d.status?.actualReceivedAmount ?? 0),
-        },
-        creationDate: toYMD(d.createdAt ?? new Date()),
-      };
-      return order;
-    } catch (error) {
-      return rejectWithValue('获取订单详情失败');
     }
   }
 );
@@ -194,46 +127,52 @@ export const addOrder = createAsyncThunk(
         exits: undefined,
         estimated_amount: calculateEstimatedAmount(orderData.equipmentItems),
         creation_date: new Date().toISOString().slice(0, 10),
-        equipmentItems: orderData.equipmentItems.map(it => ({
-          equipmentType: it.equipmentType,
+        equipment_items: orderData.equipmentItems.map(it => ({
+          equipment_category: it.equipmentCategory || '其他',
+          equipment_type: it.equipmentType,
           height: it.height,
           quantity: it.quantity,
-          monthlyRate: it.monthlyRate,
-          dailyRate: it.dailyRate,
+          monthly_rate: it.monthlyRate,
+          daily_rate: it.dailyRate,
           deposit: it.deposit,
-          shippingFee: it.shippingFee,
-          modificationFee: it.modificationFee,
-          scheduledEntryDate: it.scheduledEntryDate,
-          estimatedExitDate: it.estimatedExitDate,
-          rentalPeriod: it.rentalPeriod,
-          shippingType: it.shippingType,
+          shipping_fee: it.shippingFee,
+          modification_fee: it.modificationFee,
+          scheduled_entry_date: it.scheduledEntryDate,
+          estimated_exit_date: it.estimatedExitDate,
+          rental_period: it.rentalPeriod,
+          shipping_type: it.shippingType,
         })),
       } as any;
-      const createResp = await fetch(`${API_BASE}/orders`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const createJson = await createResp.json();
-      if (!createResp.ok || createJson?.ok === false) {
-        throw new Error(createJson?.error || '新增订单失败');
+      
+      // 添加日志以便调试
+      console.log('[OrdersSlice] Creating order with payload:', payload);
+      
+      const createJson = await apiPost<any>('/orders', payload);
+      console.log('[OrdersSlice] Order creation response:', createJson);
+      
+      // 确保正确提取订单ID
+      const id = String((createJson as any)?.id || (createJson as any)?.data?.id || (createJson as any)?.insertId);
+      if (!id) {
+        throw new Error('无法获取创建的订单ID');
       }
-      const id = String(createJson.id);
-      const detailResp = await fetch(`${API_BASE}/orders/${id}`);
-      const detailJson = await detailResp.json();
-      if (!detailResp.ok || detailJson?.ok === false) {
-        throw new Error(detailJson?.error || '获取订单详情失败');
-      }
-      const d = detailJson.data || {};
+      
+      // 获取创建的订单详情
+      const detailJson = await apiGet<any>(`/orders/${id}`);
+      console.log('[OrdersSlice] Order detail response:', detailJson);
+      
+      // apiGet 会直接返回 订单对象，而不是 { data: {...} }
+      const d = Array.isArray(detailJson) ? {} : (typeof detailJson === 'object' && detailJson !== null ? detailJson : {});
       const toYMD = (x: any): string => {
         if (!x) return '';
         if (typeof x === 'string') return x.slice(0, 10);
         try { return x.toISOString().slice(0, 10); } catch (_) { return String(x).slice(0, 10); }
       };
+      
       const order: Order = {
         id: String(d.id ?? id),
         contractNumber: d.contract_number ?? '',
         lessorId: d.lessor_id ? String(d.lessor_id) : '',
+        lessorCompanyId: d.lessor_company_id ? String(d.lessor_company_id) : '',  // 添加对 lessor_company_id 的支持
         lessorName: d.lessor_name ?? d.vendor_name ?? '',
         customerId: d.customer_id ? String(d.customer_id) : '',
         customerName: d.customer_name ?? '',
@@ -285,9 +224,14 @@ export const addOrder = createAsyncThunk(
         },
         creationDate: toYMD(d.createdAt ?? new Date()),
       };
+      
+      console.log('[OrdersSlice] Processed order:', order);
       return order;
-    } catch (error) {
-      return rejectWithValue('新增订单失败');
+    } catch (error: any) {
+      console.error('[OrdersSlice] Add order error:', error);
+      // 提供更详细的错误信息
+      const errorMessage = error?.message || error?.error || '新增订单失败';
+      return rejectWithValue(errorMessage);
     }
   }
 );
@@ -297,12 +241,10 @@ export const updateOrder = createAsyncThunk(
   async (updatedOrder: Order, { rejectWithValue }) => {
     try {
       // 调用后端更新订单基础信息（状态/附件/在租设备等）
-      const resp = await fetch(`${API_BASE}/orders/${updatedOrder.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      await apiPut(`/orders/${updatedOrder.id}`, {
           contract_number: updatedOrder.contractNumber,
           lessor_id: updatedOrder.lessorId,
+          lessor_company_id: updatedOrder.lessorCompanyId,  // 添加对 lessor_company_id 的支持
           lessor_name: updatedOrder.lessorName,
           customer_id: updatedOrder.customerId,
           customer_name: updatedOrder.customerName,
@@ -326,12 +268,7 @@ export const updateOrder = createAsyncThunk(
           exits: updatedOrder.exits,
           estimatedAmount: updatedOrder.estimatedAmount,
           creationDate: updatedOrder.creationDate,
-        }),
-      });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || data?.ok === false) {
-        throw new Error(data?.error || '更新订单失败');
-      }
+        });
       return updatedOrder;
     } catch (error) {
       return rejectWithValue('更新订单失败');
@@ -343,11 +280,7 @@ export const deleteOrder = createAsyncThunk(
   'orders/deleteOrder',
   async (orderId: string, { rejectWithValue }) => {
     try {
-      const resp = await fetch(`${API_BASE}/orders/${orderId}`, { method: 'DELETE' });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || data?.ok === false) {
-        throw new Error(data?.error || '删除订单失败');
-      }
+      await apiDelete(`/orders/${orderId}`);
       return orderId;
     } catch (error) {
       return rejectWithValue('删除订单失败');
@@ -355,268 +288,303 @@ export const deleteOrder = createAsyncThunk(
   }
 );
 
-// 记录创建 thunks
-export const addReceipt = createAsyncThunk(
-  'orders/addReceipt',
-  async (params: { orderId: string; record: ReceiptRecord }, { rejectWithValue }) => {
-    try {
-      const { orderId, record } = params;
-      const resp = await fetch(`${API_BASE}/orders/${orderId}/receipts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          receiptNumber: record.receiptNumber,
-          contractName: record.contractName,
-          receiptDate: record.receiptDate,
-          paymentMethod: record.paymentMethod,
-          amount: record.amount,
-          attachments: record.attachments,
-          remark: record.remark,
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok || data?.ok === false) {
-        throw new Error(data?.error || '新增收款记录失败');
-      }
-      return { orderId, record: { ...record, id: String(data.id || record.id) } };
-    } catch (error: any) {
-      return rejectWithValue(error?.message || '新增收款记录失败');
-    }
-  }
-);
-
-// 新增：退款记录
-export const addRefund = createAsyncThunk(
-  'orders/addRefund',
-  async (params: { orderId: string; record: RefundRecord }, { rejectWithValue }) => {
-    try {
-      const { orderId, record } = params;
-      const resp = await fetch(`${API_BASE}/orders/${orderId}/refunds`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          refundNumber: record.refundNumber,
-          contractName: record.contractName,
-          refundDate: record.refundDate,
-          paymentMethod: record.paymentMethod,
-          amount: record.amount,
-          attachments: record.attachments,
-          remark: record.remark,
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok || data?.ok === false) {
-        throw new Error(data?.error || '新增退款记录失败');
-      }
-      return { orderId, record: { ...record, id: String(data.id || record.id) } };
-    } catch (error: any) {
-      return rejectWithValue(error?.message || '新增退款记录失败');
-    }
-  }
-);
-
-export const addSuspension = createAsyncThunk(
-  'orders/addSuspension',
-  async (params: { orderId: string; record: SuspensionRecord }, { rejectWithValue }) => {
-    try {
-      const { orderId, record } = params;
-      const resp = await fetch(`${API_BASE}/orders/${orderId}/suspensions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          suspensionNumber: record.suspensionNumber,
-          contractName: record.contractName,
-          suspensionType: record.suspensionType,
-          reason: record.reason,
-          startDate: record.startDate,
-          endDate: record.endDate,
-          suspensionDays: record.suspensionDays,
-          equipmentSelections: record.equipmentSelections,
-          attachments: record.attachments,
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok || data?.ok === false) {
-        throw new Error(data?.error || '新增报停记录失败');
-      }
-      return { orderId, record: { ...record, id: String(data.id || record.id) } };
-    } catch (error: any) {
-      return rejectWithValue(error?.message || '新增报停记录失败');
-    }
-  }
-);
-
-export const addClaim = createAsyncThunk(
-  'orders/addClaim',
-  async (params: { orderId: string; record: ClaimRecord }, { rejectWithValue }) => {
-    try {
-      const { orderId, record } = params;
-      const resp = await fetch(`${API_BASE}/orders/${orderId}/claims`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          claimNumber: record.claimNumber,
-          contractName: record.contractName,
-          reason: record.reason,
-          claimDate: record.claimDate,
-          claimAmount: record.claimAmount,
-          equipmentSelections: record.equipmentSelections,
-          attachments: record.attachments,
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok || data?.ok === false) {
-        throw new Error(data?.error || '新增索赔记录失败');
-      }
-      return { orderId, record: { ...record, id: String(data.id || record.id) } };
-    } catch (error: any) {
-      return rejectWithValue(error?.message || '新增索赔记录失败');
-    }
-  }
-);
-
-export const addSettlement = createAsyncThunk(
-  'orders/addSettlement',
-  async (params: { orderId: string; record: SettlementRecord }, { rejectWithValue }) => {
-    try {
-      const { orderId, record } = params;
-      const resp = await fetch(`${API_BASE}/orders/${orderId}/settlements`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          settlementNumber: record.settlementNumber,
-          contractName: record.contractName,
-          settlementDate: record.settlementDate,
-          settlementAmount: record.settlementAmount,
-          attachments: record.attachments,
-          remark: record.remark,
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok || data?.ok === false) {
-        throw new Error(data?.error || '新增结算记录失败');
-      }
-      return { orderId, record: { ...record, id: String(data.id || record.id) } };
-    } catch (error: any) {
-      return rejectWithValue(error?.message || '新增结算记录失败');
-    }
-  }
-);
-
-export const addClearance = createAsyncThunk(
-  'orders/addClearance',
-  async (params: { orderId: string; record: ClearanceRecord }, { rejectWithValue }) => {
-    try {
-      const { orderId, record } = params;
-      const resp = await fetch(`${API_BASE}/orders/${orderId}/clearances`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clearanceNumber: record.clearanceNumber,
-          contractName: record.contractName,
-          clearanceDate: record.clearanceDate,
-          clearanceAmount: record.clearanceAmount,
-          attachments: record.attachments,
-          remark: record.remark,
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok || data?.ok === false) {
-        throw new Error(data?.error || '新增结清记录失败');
-      }
-      return { orderId, record: { ...record, id: String(data.id || record.id) } };
-    } catch (error: any) {
-      return rejectWithValue(error?.message || '新增结清记录失败');
-    }
-  }
-);
-
-// 新增：进场记录
+// 新增：添加进场记录
 export const addEntry = createAsyncThunk(
   'orders/addEntry',
-  async (params: { orderId: string; record: any }, { rejectWithValue }) => {
+  async ({ orderId, record }: { orderId: string; record: any }, { rejectWithValue }) => {
     try {
-      const { orderId, record } = params;
-      const resp = await fetch(`${API_BASE}/orders/${orderId}/entries`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          entryNumber: record.entryNumber,
-          contractName: record.contractName,
-          entryDate: record.entryDate,
-          equipmentSummary: record.equipmentSummary,
-          equipmentCodes: record.equipmentCodes,
-          transportMethod: record.transportMethod,
-          businessManagerName: record.businessManagerName,
-          handoverPerson: record.handoverPerson,
-          attachments: record.attachments,
-          vehicleId: record.vehicleId,
-          driverId: record.driverId,
-          companyId: record.companyId,
-          companyContactName: record.companyContactName,
-          companyContactPhone: record.companyContactPhone,
-          logisticsCost: record.logisticsCost,
-          vehiclePlate: record.vehiclePlate,
-          driverName: record.driverName,
-          driverPhone: record.driverPhone,
-          companyName: record.companyName,
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok || data?.ok === false) {
-        throw new Error(data?.error || '新增进场记录失败');
-      }
-      return { orderId, record: { ...record, id: String(data.id || record.id) } };
-    } catch (error: any) {
-      return rejectWithValue(error?.message || '新增进场记录失败');
+      const response = await apiPost<{ id: number }>(`/orders/${orderId}/entries`, record);
+      return { orderId, record: { ...record, id: String(response.id) } };
+    } catch (error) {
+      return rejectWithValue('添加进场记录失败');
     }
   }
 );
 
-// 新增：退场记录
+// 新增：添加退场记录
 export const addExit = createAsyncThunk(
   'orders/addExit',
-  async (params: { orderId: string; record: any }, { rejectWithValue }) => {
+  async ({ orderId, record }: { orderId: string; record: any }, { rejectWithValue }) => {
     try {
-      const { orderId, record } = params;
-      const resp = await fetch(`${API_BASE}/orders/${orderId}/exits`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          exitNumber: record.exitNumber,
-          contractName: record.contractName,
-          exitDate: record.exitDate,
-          equipmentSummary: record.equipmentSummary,
-          equipmentCodes: record.equipmentCodes,
-          transportMethod: record.transportMethod,
-          businessManagerName: record.businessManagerName,
-          handoverPerson: record.handoverPerson,
-          attachments: record.attachments,
-          vehicleId: record.vehicleId,
-          driverId: record.driverId,
-          companyId: record.companyId,
-          companyContactName: record.companyContactName,
-          companyContactPhone: record.companyContactPhone,
-          logisticsCost: record.logisticsCost,
-          vehiclePlate: record.vehiclePlate,
-          driverName: record.driverName,
-          driverPhone: record.driverPhone,
-          companyName: record.companyName,
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok || data?.ok === false) {
-        throw new Error(data?.error || '新增退场记录失败');
-      }
-      return { orderId, record: { ...record, id: String(data.id || record.id) } };
-    } catch (error: any) {
-      return rejectWithValue(error?.message || '新增退场记录失败');
+      const response = await apiPost<{ id: number }>(`/orders/${orderId}/exits`, record);
+      return { orderId, record: { ...record, id: String(response.id) } };
+    } catch (error) {
+      return rejectWithValue('添加退场记录失败');
     }
   }
 );
 
-// Slice创建
-const ordersSlice = createSlice({
+// 新增：添加收款记录
+export const addReceipt = createAsyncThunk(
+  'orders/addReceipt',
+  async ({ orderId, record }: { orderId: string; record: any }, { rejectWithValue }) => {
+    try {
+      const response = await apiPost<{ id: number }>(`/orders/${orderId}/receipts`, record);
+      return { orderId, record: { ...record, id: String(response.id) } };
+    } catch (error) {
+      return rejectWithValue('添加收款记录失败');
+    }
+  }
+);
+
+// 新增：添加退款记录
+export const addRefund = createAsyncThunk(
+  'orders/addRefund',
+  async ({ orderId, record }: { orderId: string; record: any }, { rejectWithValue }) => {
+    try {
+      const response = await apiPost<{ id: number }>(`/orders/${orderId}/refunds`, record);
+      return { orderId, record: { ...record, id: String(response.id) } };
+    } catch (error) {
+      return rejectWithValue('添加退款记录失败');
+    }
+  }
+);
+
+// 新增：删除收款记录
+export const deleteReceipt = createAsyncThunk(
+  'orders/deleteReceipt',
+  async ({ orderId, receiptId }: { orderId: string; receiptId: string }, { rejectWithValue }) => {
+    try {
+      await apiDelete(`/orders/${orderId}/receipts/${receiptId}`);
+      return { orderId, receiptId };
+    } catch (error) {
+      return rejectWithValue('删除收款记录失败');
+    }
+  }
+);
+
+// 新增：删除退款记录
+export const deleteRefund = createAsyncThunk(
+  'orders/deleteRefund',
+  async ({ orderId, refundId }: { orderId: string; refundId: string }, { rejectWithValue }) => {
+    try {
+      await apiDelete(`/orders/${orderId}/refunds/${refundId}`);
+      return { orderId, refundId };
+    } catch (error) {
+      return rejectWithValue('删除退款记录失败');
+    }
+  }
+);
+
+// 新增：添加报停记录
+export const addSuspension = createAsyncThunk(
+  'orders/addSuspension',
+  async ({ orderId, record }: { orderId: string; record: any }, { rejectWithValue }) => {
+    try {
+      console.log('[addSuspension] 提交报停记录:', { orderId, record });
+      const response = await apiPost<{ id: number }>(`/orders/${orderId}/suspensions`, record);
+      return { orderId, record: { ...record, id: String(response.id) } };
+    } catch (error: any) {
+      console.error('[addSuspension] 错误:', error);
+      const errorMessage = error?.message || error?.error || '添加报停记录失败';
+      return rejectWithValue(errorMessage);
+    }
+  }
+);
+
+// 新增：添加索赔记录
+export const addClaim = createAsyncThunk(
+  'orders/addClaim',
+  async ({ orderId, record }: { orderId: string; record: any }, { rejectWithValue }) => {
+    try {
+      const response = await apiPost<{ id: number }>(`/orders/${orderId}/claims`, record);
+      return { orderId, record: { ...record, id: String(response.id) } };
+    } catch (error) {
+      return rejectWithValue('添加索赔记录失败');
+    }
+  }
+);
+
+// 新增：添加结算记录
+export const addSettlement = createAsyncThunk(
+  'orders/addSettlement',
+  async ({ orderId, record }: { orderId: string; record: any }, { rejectWithValue }) => {
+    try {
+      const response = await apiPost<{ id: number }>(`/orders/${orderId}/settlements`, record);
+      return { orderId, record: { ...record, id: String(response.id) } };
+    } catch (error: any) {
+      const message = error.message || '添加结算记录失败';
+      const details = error.details ? ` (${JSON.stringify(error.details)})` : '';
+      return rejectWithValue(message + details);
+    }
+  }
+);
+
+// 新增：更新结算记录（用于对账状态等）
+export const updateSettlement = createAsyncThunk(
+  'orders/updateSettlement',
+  async ({ orderId, settlementId, updates }: { orderId: string; settlementId: string; updates: any }, { rejectWithValue }) => {
+    try {
+      await apiPut(`/orders/${orderId}/settlements/${settlementId}`, updates);
+      return { orderId, settlementId, updates };
+    } catch (error: any) {
+      const message = error.message || '更新结算记录失败';
+      return rejectWithValue(message);
+    }
+  }
+);
+
+// 新增：删除结算记录
+export const deleteSettlement = createAsyncThunk(
+  'orders/deleteSettlement',
+  async ({ orderId, settlementId }: { orderId: string; settlementId: string }, { rejectWithValue }) => {
+    try {
+      await apiDelete(`/orders/${orderId}/settlements/${settlementId}`);
+      return { orderId, settlementId };
+    } catch (error: any) {
+      const message = error.message || '删除结算记录失败';
+      return rejectWithValue(message);
+    }
+  }
+);
+
+// 新增：添加结清记录
+export const addClearance = createAsyncThunk(
+  'orders/addClearance',
+  async ({ orderId, record }: { orderId: string; record: any }, { rejectWithValue }) => {
+    try {
+      const response = await apiPost<{ id: number }>(`/orders/${orderId}/clearances`, record);
+      return { orderId, record: { ...record, id: String(response.id) } };
+    } catch (error: any) {
+      const message = error.message || '添加结清记录失败';
+      const details = error.details ? ` (${JSON.stringify(error.details)})` : '';
+      return rejectWithValue(message + details);
+    }
+  }
+);
+
+// 新增：删除进场记录
+export const deleteEntry = createAsyncThunk(
+  'orders/deleteEntry',
+  async ({ orderId, entryId }: { orderId: string; entryId: string }, { rejectWithValue }) => {
+    try {
+      await apiDelete(`/orders/${orderId}/entries/${entryId}`);
+      return { orderId, entryId };
+    } catch (error) {
+      return rejectWithValue('删除进场记录失败');
+    }
+  }
+);
+
+// 新增：删除退场记录
+export const deleteExit = createAsyncThunk(
+  'orders/deleteExit',
+  async ({ orderId, exitId }: { orderId: string; exitId: string }, { rejectWithValue }) => {
+    try {
+      await apiDelete(`/orders/${orderId}/exits/${exitId}`);
+      return { orderId, exitId };
+    } catch (error) {
+      return rejectWithValue('删除退场记录失败');
+    }
+  }
+);
+
+export const fetchOrderById = createAsyncThunk(
+  'orders/fetchOrderById',
+  async (orderId: string, { rejectWithValue }) => {
+    try {
+      // 优先请求详情接口；若不可用，则回退到列表查询并根据 id 取一条
+      let d: any = {};
+      try {
+        const json = await apiGet<any>(`/orders/${orderId}`);
+        // apiGet 会直接返回 订单对象，而不是 { data: {...} }
+        d = Array.isArray(json) ? {} : (typeof json === 'object' && json !== null ? json : {});
+      } catch (_) {
+        // 回退：从列表中查找
+        const listJson = await apiGet<any[]>('/orders');
+        const list = Array.isArray(listJson) ? listJson : (listJson as any)?.data || [];
+        const found = list.find((o: any) => String(o.id) === String(orderId));
+        if (!found) throw new Error('获取订单详情失败');
+        d = found;
+      }
+      const toYMD = (x: any): string => {
+        if (!x) return '';
+        if (typeof x === 'string') return x.slice(0, 10);
+        try { return x.toISOString().slice(0, 10); } catch (_) { return String(x).slice(0, 10); }
+      };
+      const order: Order = {
+        id: String(d.id ?? orderId),
+        contractNumber: d.contract_number ?? '',
+        lessorId: d.lessor_id ? String(d.lessor_id) : '',
+        lessorCompanyId: d.lessor_company_id ? String(d.lessor_company_id) : '',  // 添加对 lessor_company_id 的支持
+        lessorName: d.lessor_name ?? d.vendor_name ?? '',
+        customerId: d.customer_id ? String(d.customer_id) : '',
+        customerName: d.customer_name ?? '',
+        projectName: d.project_name ?? '',
+        businessManagerId: d.business_manager_id ? String(d.business_manager_id) : '',
+        businessManagerName: d.business_manager_name ?? '',
+        monthCalculationMethod: d.month_calculation_method ?? '30天为一月',
+        paymentAgreement: d.payment_agreement ?? '预付',
+        shippingFeeReduction: d.shipping_fee_reduction ?? '无减免',
+        shippingFeeCalculation: d.shipping_fee_calculation ?? '按台计费',
+        isTaxInvoice: d.is_tax_invoice ?? '不开票',
+        invoiceTaxRate: d.invoice_tax_rate ?? undefined,
+        constructionCategory: d.construction_category ?? '其他',
+        deliveryLocation: d.delivery_location ?? '',
+        otherAgreements: d.other_agreements ?? '',
+        equipmentItems: (d.equipmentItems || d.equipment_items || []).map((it: any) => ({
+          id: String(it.id ?? ''),
+          equipmentType: it.equipmentType ?? it.equipment_type ?? '',
+          height: it.height ?? '',
+          quantity: Number(it.quantity ?? 0),
+          dailyRate: Number(it.dailyRate ?? it.daily_rate ?? 0),
+          monthlyRate: Number(it.monthlyRate ?? it.monthly_rate ?? 0),
+          deposit: Number(it.deposit ?? 0),
+          shippingFee: Number(it.shippingFee ?? it.shipping_fee ?? 0),
+          modificationFee: Number(it.modificationFee ?? it.modification_fee ?? 0),
+          scheduledEntryDate: it.scheduledEntryDate ?? it.scheduled_entry_date ?? '',
+          estimatedExitDate: it.estimatedExitDate ?? it.estimated_exit_date ?? '',
+          rentalPeriod: Number(it.rentalPeriod ?? it.rental_period ?? 0),
+          shippingType: it.shippingType ?? (it.shipping_type ? (String(it.shipping_type) === '单程' ? '单程' : '双程') : '双程'),
+        })),
+        rentedEquipmentIds: normalizeRented(d.rentedEquipmentIds ?? d.rented_equipment_ids),
+        estimatedAmount: Number(d.estimated_amount ?? 0),
+        receipts: d.receipts ?? undefined,
+        refunds: d.refunds ?? undefined,
+        suspensions: d.suspensions ?? undefined,
+        claims: d.claims ?? undefined,
+        settlements: d.settlements ?? undefined,
+        clearances: d.clearances ?? undefined,
+        archivedAt: undefined,
+        entryAttachments: d.entryAttachments ?? undefined,
+        exitAttachments: d.exitAttachments ?? undefined,
+        entries: d.entries ?? undefined,
+        exits: d.exits ?? undefined,
+        status: {
+          entryCount: Number(d.status?.entryCount ?? 0),
+          exitCount: Number(d.status?.exitCount ?? 0),
+          performanceStatus: d.status?.performanceStatus ?? '履约',
+          actualReceivedAmount: Number(d.status?.actualReceivedAmount ?? 0),
+        },
+        creationDate: toYMD(d.createdAt ?? new Date()),
+      };
+      console.log('[fetchOrderById] ⚠️ API返回数据:', {
+        orderId,
+        raw_rentedEquipmentIds: d.rentedEquipmentIds,
+        raw_rented_equipment_ids: d.rented_equipment_ids,
+        normalized: order.rentedEquipmentIds,
+        flatCount: (order.rentedEquipmentIds || []).flat().length
+      });
+      console.log('[fetchOrderById] 进场记录数据:', JSON.stringify(d.entries, null, 2));
+      console.log('[fetchOrderById] 退场记录数据:', JSON.stringify(d.exits, null, 2));
+      return order;
+    } catch (error) {
+      return rejectWithValue('获取订单详情失败');
+    }
+  }
+);
+
+// 初始状态
+const initialState: OrdersState = {
+  orders: [],
+  loading: false,
+  error: null,
+  selectedOrder: null,
+  detailsById: {},
+  detailsLoadingById: {}
+};
+
+export const ordersSlice = createSlice({
   name: 'orders',
   initialState,
   reducers: {
@@ -625,293 +593,349 @@ const ordersSlice = createSlice({
     },
     clearOrderError: (state) => {
       state.error = null;
-    }
+    },
   },
   extraReducers: (builder) => {
-    // fetchOrders
-    builder
-      .addCase(fetchOrders.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(fetchOrders.fulfilled, (state, action) => {
-        state.loading = false;
-        state.orders = action.payload;
-      })
-      .addCase(fetchOrders.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload as string;
-      });
-    
-    // addOrder
-    builder
-      .addCase(addOrder.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(addOrder.fulfilled, (state, action) => {
-        state.loading = false;
-        state.orders.push(action.payload);
-      })
-      .addCase(addOrder.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload as string;
-      });
-    
-    // updateOrder
-    builder
-      .addCase(updateOrder.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(updateOrder.fulfilled, (state, action) => {
-        state.loading = false;
-        const index = state.orders.findIndex(order => order.id === action.payload.id);
-        if (index !== -1) {
-          state.orders[index] = action.payload;
-        }
-        // 同步详情缓存，避免详情页数据陈旧
-        const id = action.payload.id;
-        if (state.detailsById && state.detailsById[id]) {
-          state.detailsById[id] = action.payload;
-        }
-      })
-      .addCase(updateOrder.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload as string;
-      });
-    
-    // deleteOrder
-    builder
-      .addCase(deleteOrder.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(deleteOrder.fulfilled, (state, action) => {
-        state.loading = false;
-        state.orders = state.orders.filter(order => order.id !== action.payload);
-      })
-      .addCase(deleteOrder.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload as string;
-      });
-
+    builder.addCase(fetchOrders.pending, (state) => {
+      state.loading = true;
+      state.error = null;
+    });
+    builder.addCase(fetchOrders.fulfilled, (state, action) => {
+      state.loading = false;
+      state.orders = action.payload;
+    });
+    builder.addCase(fetchOrders.rejected, (state, action) => {
+      state.loading = false;
+      state.error = action.payload as string;
+    });
+    builder.addCase(addOrder.pending, (state) => {
+      state.loading = true;
+      state.error = null;
+    });
+    builder.addCase(addOrder.fulfilled, (state, action) => {
+      state.loading = false;
+      state.orders.push(action.payload);
+    });
+    builder.addCase(addOrder.rejected, (state, action) => {
+      state.loading = false;
+      state.error = action.payload as string;
+    });
+    builder.addCase(updateOrder.pending, (state) => {
+      state.loading = true;
+      state.error = null;
+    });
+    builder.addCase(updateOrder.fulfilled, (state, action) => {
+      state.loading = false;
+      const index = state.orders.findIndex((o) => o.id === action.payload.id);
+      if (index !== -1) {
+        state.orders[index] = action.payload;
+      }
+    });
+    builder.addCase(updateOrder.rejected, (state, action) => {
+      state.loading = false;
+      state.error = action.payload as string;
+    });
+    builder.addCase(deleteOrder.pending, (state) => {
+      state.loading = true;
+      state.error = null;
+    });
+    builder.addCase(deleteOrder.fulfilled, (state, action) => {
+      state.loading = false;
+      state.orders = state.orders.filter((o) => o.id !== action.payload);
+    });
+    builder.addCase(deleteOrder.rejected, (state, action) => {
+      state.loading = false;
+      state.error = action.payload as string;
+    });
+    // addEntry
+    builder.addCase(addEntry.pending, (state) => {
+      state.loading = true;
+      state.error = null;
+    });
+    builder.addCase(addEntry.fulfilled, (state, action) => {
+      state.loading = false;
+      const { orderId, record } = action.payload;
+      const order = state.orders.find(o => o.id === orderId);
+      if (order) {
+        if (!order.entries) order.entries = [];
+        order.entries.push(record);
+        // 更新进场数量
+        order.status.entryCount = (order.status.entryCount || 0) + (record.equipmentCount || record.equipmentCodes?.length || 0);
+      }
+    });
+    builder.addCase(addEntry.rejected, (state, action) => {
+      state.loading = false;
+      state.error = action.payload as string;
+    });
+    // addExit
+    builder.addCase(addExit.pending, (state) => {
+      state.loading = true;
+      state.error = null;
+    });
+    builder.addCase(addExit.fulfilled, (state, action) => {
+      state.loading = false;
+      const { orderId, record } = action.payload;
+      const order = state.orders.find(o => o.id === orderId);
+      if (order) {
+        if (!order.exits) order.exits = [];
+        order.exits.push(record);
+        // 更新退场数量
+        order.status.exitCount = (order.status.exitCount || 0) + (record.equipmentCount || record.equipmentCodes?.length || 0);
+      }
+    });
+    builder.addCase(addExit.rejected, (state, action) => {
+      state.loading = false;
+      state.error = action.payload as string;
+    });
     // addReceipt
-    builder
-      .addCase(addReceipt.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(addReceipt.fulfilled, (state, action) => {
-        state.loading = false;
-        const { orderId, record } = action.payload as { orderId: string; record: ReceiptRecord };
-        const idx = state.orders.findIndex(o => o.id === orderId);
-        if (idx !== -1) {
-          const prev = state.orders[idx];
-          const currentAmount = prev.status?.actualReceivedAmount || 0;
-          state.orders[idx] = {
-            ...prev,
-            receipts: [...(prev.receipts || []), record],
-            status: { ...prev.status, actualReceivedAmount: currentAmount + (record.amount || 0) }
-          } as Order;
-        }
-        if (state.detailsById && state.detailsById[orderId]) {
-          const prev = state.detailsById[orderId] as Order;
-          const currentAmount = prev.status?.actualReceivedAmount || 0;
-          state.detailsById[orderId] = {
-            ...prev,
-            receipts: [...(prev.receipts || []), record],
-            status: { ...prev.status, actualReceivedAmount: currentAmount + (record.amount || 0) }
-          } as Order;
-        }
-      })
-      .addCase(addReceipt.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload as string;
-      });
-
+    builder.addCase(addReceipt.pending, (state) => {
+      state.loading = true;
+      state.error = null;
+    });
+    builder.addCase(addReceipt.fulfilled, (state, action) => {
+      state.loading = false;
+      const { orderId, record } = action.payload;
+      const order = state.orders.find(o => o.id === orderId);
+      if (order) {
+        if (!order.receipts) order.receipts = [];
+        order.receipts.push(record);
+      }
+    });
+    builder.addCase(addReceipt.rejected, (state, action) => {
+      state.loading = false;
+      state.error = action.payload as string;
+    });
     // addRefund
-    builder
-      .addCase(addRefund.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(addRefund.fulfilled, (state, action) => {
-        state.loading = false;
-        const { orderId, record } = action.payload as { orderId: string; record: RefundRecord };
-        const idx = state.orders.findIndex(o => o.id === orderId);
-        if (idx !== -1) {
-          const prev = state.orders[idx];
-          const currentAmount = prev.status?.actualReceivedAmount || 0;
-          state.orders[idx] = {
-            ...prev,
-            refunds: [...(prev.refunds || []), record],
-            status: { ...prev.status, actualReceivedAmount: Math.max(0, currentAmount - (record.amount || 0)) }
-          } as Order;
-        }
-        if (state.detailsById && state.detailsById[orderId]) {
-          const prev = state.detailsById[orderId] as Order;
-          const currentAmount = prev.status?.actualReceivedAmount || 0;
-          state.detailsById[orderId] = {
-            ...prev,
-            refunds: [...(prev.refunds || []), record],
-            status: { ...prev.status, actualReceivedAmount: Math.max(0, currentAmount - (record.amount || 0)) }
-          } as Order;
-        }
-      })
-      .addCase(addRefund.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload as string;
-      });
-
+    builder.addCase(addRefund.pending, (state) => {
+      state.loading = true;
+      state.error = null;
+    });
+    builder.addCase(addRefund.fulfilled, (state, action) => {
+      state.loading = false;
+      const { orderId, record } = action.payload;
+      const order = state.orders.find(o => o.id === orderId);
+      if (order) {
+        if (!order.refunds) order.refunds = [];
+        order.refunds.push(record);
+      }
+    });
+    builder.addCase(addRefund.rejected, (state, action) => {
+      state.loading = false;
+      state.error = action.payload as string;
+    });
+    // deleteReceipt
+    builder.addCase(deleteReceipt.pending, (state) => {
+      state.loading = true;
+      state.error = null;
+    });
+    builder.addCase(deleteReceipt.fulfilled, (state, action) => {
+      state.loading = false;
+      const { orderId, receiptId } = action.payload;
+      const order = state.orders.find(o => o.id === orderId);
+      if (order && order.receipts) {
+        order.receipts = order.receipts.filter(r => r.id !== receiptId);
+      }
+    });
+    builder.addCase(deleteReceipt.rejected, (state, action) => {
+      state.loading = false;
+      state.error = action.payload as string;
+    });
+    // deleteRefund
+    builder.addCase(deleteRefund.pending, (state) => {
+      state.loading = true;
+      state.error = null;
+    });
+    builder.addCase(deleteRefund.fulfilled, (state, action) => {
+      state.loading = false;
+      const { orderId, refundId } = action.payload;
+      const order = state.orders.find(o => o.id === orderId);
+      if (order && order.refunds) {
+        order.refunds = order.refunds.filter(r => r.id !== refundId);
+      }
+    });
+    builder.addCase(deleteRefund.rejected, (state, action) => {
+      state.loading = false;
+      state.error = action.payload as string;
+    });
     // addSuspension
-    builder
-      .addCase(addSuspension.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(addSuspension.fulfilled, (state, action) => {
-        state.loading = false;
-        const { orderId, record } = action.payload as { orderId: string; record: SuspensionRecord };
-        const idx = state.orders.findIndex(o => o.id === orderId);
-        if (idx !== -1) {
-          const prev = state.orders[idx];
-          state.orders[idx] = {
-            ...prev,
-            suspensions: [...(prev.suspensions || []), record],
-          } as Order;
-        }
-      })
-      .addCase(addSuspension.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload as string;
-      });
-
+    builder.addCase(addSuspension.pending, (state) => {
+      state.loading = true;
+      state.error = null;
+    });
+    builder.addCase(addSuspension.fulfilled, (state, action) => {
+      state.loading = false;
+      const { orderId, record } = action.payload;
+      const order = state.orders.find(o => o.id === orderId);
+      if (order) {
+        if (!order.suspensions) order.suspensions = [];
+        order.suspensions.push(record);
+      }
+    });
+    builder.addCase(addSuspension.rejected, (state, action) => {
+      state.loading = false;
+      state.error = action.payload as string;
+    });
     // addClaim
-    builder
-      .addCase(addClaim.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(addClaim.fulfilled, (state, action) => {
-        state.loading = false;
-        const { orderId, record } = action.payload as { orderId: string; record: ClaimRecord };
-        const idx = state.orders.findIndex(o => o.id === orderId);
-        if (idx !== -1) {
-          const prev = state.orders[idx];
-          state.orders[idx] = {
-            ...prev,
-            claims: [...(prev.claims || []), record],
-          } as Order;
-        }
-      })
-      .addCase(addClaim.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload as string;
-      });
-
+    builder.addCase(addClaim.pending, (state) => {
+      state.loading = true;
+      state.error = null;
+    });
+    builder.addCase(addClaim.fulfilled, (state, action) => {
+      state.loading = false;
+      const { orderId, record } = action.payload;
+      const order = state.orders.find(o => o.id === orderId);
+      if (order) {
+        if (!order.claims) order.claims = [];
+        order.claims.push(record);
+      }
+    });
+    builder.addCase(addClaim.rejected, (state, action) => {
+      state.loading = false;
+      state.error = action.payload as string;
+    });
     // addSettlement
-    builder
-      .addCase(addSettlement.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(addSettlement.fulfilled, (state, action) => {
-        state.loading = false;
-        const { orderId, record } = action.payload as { orderId: string; record: SettlementRecord };
-        const idx = state.orders.findIndex(o => o.id === orderId);
-        if (idx !== -1) {
-          const prev = state.orders[idx];
-          state.orders[idx] = {
-            ...prev,
-            settlements: [...(prev.settlements || []), record],
-          } as Order;
+    builder.addCase(addSettlement.pending, (state) => {
+      state.loading = true;
+      state.error = null;
+    });
+    builder.addCase(addSettlement.fulfilled, (state, action) => {
+      state.loading = false;
+      const { orderId, record } = action.payload;
+      const order = state.orders.find(o => o.id === orderId);
+      if (order) {
+        if (!order.settlements) order.settlements = [];
+        order.settlements.push(record);
+      }
+    });
+    builder.addCase(addSettlement.rejected, (state, action) => {
+      state.loading = false;
+      state.error = action.payload as string;
+    });
+    // updateSettlement
+    builder.addCase(updateSettlement.pending, (state) => {
+      state.loading = true;
+      state.error = null;
+    });
+    builder.addCase(updateSettlement.fulfilled, (state, action) => {
+      state.loading = false;
+      const { orderId, settlementId, updates } = action.payload;
+      const order = state.orders.find(o => o.id === orderId);
+      if (order && order.settlements) {
+        const settlement = order.settlements.find((s: any) => s.id === settlementId);
+        if (settlement) {
+          Object.assign(settlement, updates);
         }
-      })
-      .addCase(addSettlement.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload as string;
-      });
-
+      }
+    });
+    builder.addCase(updateSettlement.rejected, (state, action) => {
+      state.loading = false;
+      state.error = action.payload as string;
+    });
+    // deleteSettlement
+    builder.addCase(deleteSettlement.pending, (state) => {
+      state.loading = true;
+      state.error = null;
+    });
+    builder.addCase(deleteSettlement.fulfilled, (state, action) => {
+      state.loading = false;
+      const { orderId, settlementId } = action.payload;
+      const order = state.orders.find(o => o.id === orderId);
+      if (order && order.settlements) {
+        order.settlements = order.settlements.filter((s: any) => s.id !== settlementId);
+      }
+    });
+    builder.addCase(deleteSettlement.rejected, (state, action) => {
+      state.loading = false;
+      state.error = action.payload as string;
+    });
     // addClearance
+    builder.addCase(addClearance.pending, (state) => {
+      state.loading = true;
+      state.error = null;
+    });
+    builder.addCase(addClearance.fulfilled, (state, action) => {
+      state.loading = false;
+      const { orderId, record } = action.payload;
+      const order = state.orders.find(o => o.id === orderId);
+      if (order) {
+        if (!order.clearances) order.clearances = [];
+        order.clearances.push(record);
+      }
+    });
+    builder.addCase(addClearance.rejected, (state, action) => {
+      state.loading = false;
+      state.error = action.payload as string;
+    });
+    // deleteEntry
+    builder.addCase(deleteEntry.pending, (state) => {
+      state.loading = true;
+      state.error = null;
+    });
+    builder.addCase(deleteEntry.fulfilled, (state, action) => {
+      state.loading = false;
+      const { orderId, entryId } = action.payload;
+      const order = state.orders.find(o => o.id === orderId);
+      if (order && order.entries) {
+        order.entries = order.entries.filter(e => e.id !== entryId);
+        // 更新进场数量
+        if (order.status) {
+          order.status.entryCount = order.entries.length;
+        }
+      }
+      // 同时更新detailsById
+      if (state.detailsById && state.detailsById[orderId]) {
+        const detailOrder = state.detailsById[orderId];
+        console.log('[deleteEntry] 删除前 equipmentItems:', detailOrder.equipmentItems?.length || 0);
+        if (detailOrder.entries) {
+          // ⚠️ 关键修复：确保只修改 entries，保留其他所有属性（包括 equipmentItems）
+          detailOrder.entries = detailOrder.entries.filter(e => e.id !== entryId);
+          if (detailOrder.status) {
+            detailOrder.status.entryCount = detailOrder.entries.length;
+          }
+        }
+        console.log('[deleteEntry] 删除后 equipmentItems:', detailOrder.equipmentItems?.length || 0);
+      }
+    });
+    builder.addCase(deleteEntry.rejected, (state, action) => {
+      state.loading = false;
+      state.error = action.payload as string;
+    });
+    // deleteExit
+    builder.addCase(deleteExit.pending, (state) => {
+      state.loading = true;
+      state.error = null;
+    });
+    builder.addCase(deleteExit.fulfilled, (state, action) => {
+      state.loading = false;
+      const { orderId, exitId } = action.payload;
+      const order = state.orders.find(o => o.id === orderId);
+      if (order && order.exits) {
+        order.exits = order.exits.filter(e => e.id !== exitId);
+        // 更新退场数量
+        if (order.status) {
+          order.status.exitCount = order.exits.length;
+        }
+      }
+      // 同时更新detailsById
+      if (state.detailsById && state.detailsById[orderId]) {
+        const detailOrder = state.detailsById[orderId];
+        console.log('[deleteExit] 删除前 equipmentItems:', detailOrder.equipmentItems?.length || 0);
+        if (detailOrder.exits) {
+          // ⚠️ 关键修复：确保只修改 exits，保留其他所有属性（包括 equipmentItems）
+          detailOrder.exits = detailOrder.exits.filter(e => e.id !== exitId);
+          if (detailOrder.status) {
+            detailOrder.status.exitCount = detailOrder.exits.length;
+          }
+        }
+        console.log('[deleteExit] 删除后 equipmentItems:', detailOrder.equipmentItems?.length || 0);
+      }
+    });
+    builder.addCase(deleteExit.rejected, (state, action) => {
+      state.loading = false;
+      state.error = action.payload as string;
+    });
+    // fetchOrderById
     builder
-      .addCase(addClearance.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(addClearance.fulfilled, (state, action) => {
-        state.loading = false;
-        const { orderId, record } = action.payload as { orderId: string; record: ClearanceRecord };
-        const idx = state.orders.findIndex(o => o.id === orderId);
-        if (idx !== -1) {
-          const prev = state.orders[idx];
-          state.orders[idx] = {
-            ...prev,
-            clearances: [...(prev.clearances || []), record],
-          } as Order;
-        }
-      })
-      .addCase(addClearance.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload as string;
-      })
-      // addEntry
-      .addCase(addEntry.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(addEntry.fulfilled, (state, action) => {
-        state.loading = false;
-        const { orderId, record } = action.payload as { orderId: string; record: any };
-        const idx = state.orders.findIndex(o => o.id === orderId);
-        if (idx !== -1) {
-          const prev = state.orders[idx];
-          const nextEntries = [...(prev.entries || []), record];
-          const currentCount = prev.status?.entryCount || 0;
-          const inc = (record.equipmentCount != null ? record.equipmentCount : Array.isArray(record.equipmentCodes) ? record.equipmentCodes.length : 1);
-          state.orders[idx] = { ...prev, entries: nextEntries, status: { ...prev.status, entryCount: currentCount + inc } } as Order;
-        }
-        if (state.detailsById && state.detailsById[orderId]) {
-          const prev = state.detailsById[orderId] as Order;
-          const nextEntries = [...(prev.entries || []), record];
-          const currentCount = prev.status?.entryCount || 0;
-          const inc = (record.equipmentCount != null ? record.equipmentCount : Array.isArray(record.equipmentCodes) ? record.equipmentCodes.length : 1);
-          state.detailsById[orderId] = { ...prev, entries: nextEntries, status: { ...prev.status, entryCount: currentCount + inc } } as Order;
-        }
-      })
-      .addCase(addEntry.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload as string;
-      })
-      // addExit
-      .addCase(addExit.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(addExit.fulfilled, (state, action) => {
-        state.loading = false;
-        const { orderId, record } = action.payload as { orderId: string; record: any };
-        const idx = state.orders.findIndex(o => o.id === orderId);
-        if (idx !== -1) {
-          const prev = state.orders[idx];
-          const nextExits = [...(prev.exits || []), record];
-          const currentCount = prev.status?.exitCount || 0;
-          const inc = (record.equipmentCount != null ? record.equipmentCount : Array.isArray(record.equipmentCodes) ? record.equipmentCodes.length : 1);
-          state.orders[idx] = { ...prev, exits: nextExits, status: { ...prev.status, exitCount: currentCount + inc } } as Order;
-        }
-        if (state.detailsById && state.detailsById[orderId]) {
-          const prev = state.detailsById[orderId] as Order;
-          const nextExits = [...(prev.exits || []), record];
-          const currentCount = prev.status?.exitCount || 0;
-          const inc = (record.equipmentCount != null ? record.equipmentCount : Array.isArray(record.equipmentCodes) ? record.equipmentCodes.length : 1);
-          state.detailsById[orderId] = { ...prev, exits: nextExits, status: { ...prev.status, exitCount: currentCount + inc } } as Order;
-        }
-      })
-      .addCase(addExit.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload as string;
-      })
-      // fetchOrderById
       .addCase(fetchOrderById.pending, (state, action) => {
         const id = action.meta.arg as string;
         if (state.detailsLoadingById) state.detailsLoadingById[id] = true;
@@ -921,6 +945,14 @@ const ordersSlice = createSlice({
         const order = action.payload as Order;
         if (state.detailsLoadingById) state.detailsLoadingById[order.id] = false;
         if (state.detailsById) state.detailsById[order.id] = order;
+        // 同时更新 orders 数组中的订单，确保 rentedEquipmentIds 在整个 store 中一致
+        const index = state.orders.findIndex((o) => o.id === order.id);
+        if (index !== -1) {
+          state.orders[index] = order;
+          console.log('[fetchOrderById.fulfilled] ✅ 已更新 orders 数组中的订单', order.id, {
+            rentedCount: (order.rentedEquipmentIds || []).flat().length
+          });
+        }
       })
       .addCase(fetchOrderById.rejected, (state, action) => {
         const id = (action.meta as any)?.arg as string;
@@ -930,17 +962,13 @@ const ordersSlice = createSlice({
   }
 });
 
-// 导出actions
 export const { selectOrder, clearOrderError } = ordersSlice.actions;
 
-// 导出选择器
+// 添加选择器
 export const selectOrders = (state: { orders: OrdersState }) => state.orders.orders;
 export const selectOrdersLoading = (state: { orders: OrdersState }) => state.orders.loading;
 export const selectOrdersError = (state: { orders: OrdersState }) => state.orders.error;
-export const selectSelectedOrder = (state: { orders: OrdersState }) => state.orders.selectedOrder;
-export const selectOrderDetailsById = (id: string) => (state: { orders: OrdersState }) => state.orders.detailsById?.[id];
-export const selectOrderDetailsLoadingById = (id: string) => (state: { orders: OrdersState }) => state.orders.detailsLoadingById?.[id] || false;
-export const selectOrderById = (id: string) => (state: { orders: OrdersState }) => state.orders.detailsById?.[id] || state.orders.orders.find(o => o.id === id) || null;
+export const selectOrderById = (state: { orders: OrdersState }, orderId: string) => 
+  state.orders.detailsById?.[orderId];
 
-// 导出reducer
 export default ordersSlice.reducer;

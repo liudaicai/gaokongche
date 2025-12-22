@@ -15,16 +15,31 @@ export default defineConfig({
   build: {
     // 最小化代码
     minify: 'esbuild',
+    // 提高 chunk 大小警告限制
+    chunkSizeWarningLimit: 1000,
     // 代码分割
     rollupOptions: {
       output: {
         manualChunks: {
-          // 将第三方库拆分成单独的chunk
-          vendor: ['react', 'react-dom', '@reduxjs/toolkit', 'react-redux', 'antd'],
-          charts: ['echarts', 'recharts'],
+          // React 核心库
+          'react-vendor': ['react', 'react-dom'],
+          // Redux 状态管理
+          'redux-vendor': ['@reduxjs/toolkit', 'react-redux'],
+          // Ant Design UI 库
+          'antd-vendor': ['antd'],
+          // 图表库
+          'charts-vendor': ['echarts', 'recharts'],
+          // 路由
+          'router-vendor': ['react-router-dom'],
+          // 日期处理
+          'dayjs-vendor': ['dayjs'],
         },
+        // 文件命名优化
+        chunkFileNames: 'assets/[name]-[hash].js',
+        entryFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash].[ext]',
       },
-    }
+    },
   },
   // 开发服务器优化
   server: {
@@ -34,12 +49,15 @@ export default defineConfig({
     proxy: {
       '/api': {
         // 使用 127.0.0.1 避免 Windows/IPv6 环境下 localhost 解析为 ::1 导致代理连接拒绝
-        target: 'http://127.0.0.1:3002',
+        // 切换到 MySQL 模式后端端口 3001
+        target: 'http://127.0.0.1:3001',
         changeOrigin: true,
+        // 不要 rewrite，保留 /api 前缀
+        // rewrite: (path) => path.replace(/^\/api/, ''),
       },
       // 代理静态上传文件访问，避免直接命中前端开发服务器导致 404
       '/uploads': {
-        target: 'http://127.0.0.1:3002',
+        target: 'http://127.0.0.1:3001',
         changeOrigin: true,
       },
     },

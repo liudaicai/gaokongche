@@ -64,8 +64,8 @@ const NewOrderTab: React.FC<NewOrderTabProps> = ({ tabKey }) => {
 
       const fetchModels = async () => {
          try {
-            const models = await apiGet<EquipmentModel[]>('/models');
-            setEquipmentModels(models);
+            const data = await apiGet<EquipmentModel[]>('/models');
+            setEquipmentModels(data || []);
          } catch (err) { console.error(err); }
       };
       fetchModels();

@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Form, Input, Select, DatePicker, Upload, Button, Row, Col, Divider, Typography, message, Modal } from 'antd';
-import { UploadOutlined } from '@ant-design/icons';
+import { PlusOutlined } from '@ant-design/icons';
 import { useSelector, useDispatch } from 'react-redux';
 import type { AppDispatch } from '../../../app/store';
 import { Order, ReceiptRecord } from '../types';
-import { addReceipt, selectOrders } from '../ordersSlice';
+import { addReceipt, selectOrders, fetchOrderById } from '../ordersSlice';
 import { useTabs } from '../../common/TabsContext';
+import { FixedFooterButtons } from '../../../components/FixedFooterButtons';
 
 const { Text } = Typography;
 
@@ -82,6 +83,10 @@ const ReceiptOperationTab: React.FC<Props> = ({ order, tabKey }) => {
 
       await dispatch(addReceipt({ orderId: order.id, record })).unwrap();
       message.success('收款属性配置已保存');
+      
+      // 刷新订单详情以更新收款记录列表
+      await dispatch(fetchOrderById(order.id));
+      
       closeTab(tabKey);
     } catch (e: any) {
       message.error(e?.message || '请检查表单输入');
@@ -89,13 +94,9 @@ const ReceiptOperationTab: React.FC<Props> = ({ order, tabKey }) => {
   };
 
   return (
-    <div style={{ padding: 16 }}>
+    <div style={{ padding: 16 }} className="page-with-fixed-footer">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Typography.Title level={4} style={{ margin: 0 }}>收款属性配置</Typography.Title>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Button onClick={() => closeTab(tabKey)}>返回</Button>
-          <Button type="primary" onClick={handleSave}>保存</Button>
-        </div>
       </div>
       <Form form={form} layout="vertical">
         {(() => {
@@ -174,13 +175,18 @@ const ReceiptOperationTab: React.FC<Props> = ({ order, tabKey }) => {
                 });
               })}
             >
-              <Button icon={<UploadOutlined />}>上传附件</Button>
+              <Button icon={<PlusOutlined />}>上传附件</Button>
             </Upload>
           </Form.Item>
             </React.Fragment>
           );
         })()}
       </Form>
+      
+      <FixedFooterButtons>
+        <Button onClick={() => closeTab(tabKey)}>返回</Button>
+        <Button type="primary" onClick={handleSave}>保存</Button>
+      </FixedFooterButtons>
     </div>
   );
 };

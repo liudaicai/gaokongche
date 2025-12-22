@@ -1,18 +1,22 @@
 import React from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Card, Form, Input, Button, message } from 'antd';
+import { Card, Form, Input, Button, App, Typography } from 'antd';
 import { LockOutlined, UserOutlined } from '@ant-design/icons';
 import type { RootState, AppDispatch } from '../../app/store';
 import { login, clearError } from './authSlice';
 import type { LoginFormData } from './types';
 import { useNavigate } from 'react-router-dom';
+import Logo from '../../components/common/Logo';
+
+const { Title, Text } = Typography;
 
 const LoginPage: React.FC = () => {
   const [form] = Form.useForm<LoginFormData>();
   const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate();
+  const { message } = App.useApp();
   
-  // 从Redux store中获取认证状态
+  // 从 Redux store 中获取认证状态
   const { loading, error } = useSelector((state: RootState) => state.auth);
   
   // 处理表单提交
@@ -27,30 +31,78 @@ const LoginPage: React.FC = () => {
       // 登录成功提示
       message.success('登录成功！正在跳转到系统首页...');
       
-      // 使用路由导航到首页，避免整页刷新
-      navigate('/', { replace: true });
+      // 等待一个微任务，确保 Redux 状态更新完成
+      setTimeout(() => {
+        navigate('/', { replace: true });
+      }, 100);
     } catch (err) {
       // 登录失败提示
-      message.error(error || '登录失败，请检查用户名和密码');
+      message.error((err as Error)?.message || error || '登录失败，请检查用户名和密码');
     }
   };
   
+  // 背景图片数组（星邦智能/Sinoboom 风格：蓝色高空车、剪叉车、工程场景）
+  const bgImages = [
+    'https://images.unsplash.com/photo-1578575437130-527eed3abbec?q=80&w=2000&auto=format&fit=crop', // 蓝色臂车 (类似 Sinoboom TB系列)
+    'https://images.unsplash.com/photo-1584282497676-0f30536e2577?q=80&w=2000&auto=format&fit=crop', // 剪叉车作业 (类似 Sinoboom GTJZ系列)
+    'https://images.unsplash.com/photo-1541888946425-d81bb19240f5?q=80&w=2000&auto=format&fit=crop', // 建筑工地远景
+    'https://plus.unsplash.com/premium_photo-1661962692059-55d5a4319814?q=80&w=2000&auto=format&fit=crop', // 蓝色机械细节
+  ];
+
+  // 预加载图片
+  React.useEffect(() => {
+    bgImages.forEach(src => {
+      const img = new Image();
+      img.src = src;
+    });
+  }, []);
+
+  // 轮播背景状态
+  const [currentBgIndex, setCurrentBgIndex] = React.useState(0);
+
+  // 自动切换背景
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentBgIndex((prev) => (prev + 1) % bgImages.length);
+    }, 5000); // 每5秒切换一次
+    return () => clearInterval(timer);
+  }, []);
+
   return (
     <div style={styles.container}>
-      <div style={styles.header}>
-        <h1 style={styles.title}>高空车租赁管理系统</h1>
-        <p style={styles.subtitle}>请登录您的账号</p>
-      </div>
+      {/* 背景轮播层 */}
+      {bgImages.map((img, index) => (
+        <div
+          key={img}
+          style={{
+            ...styles.bgLayer,
+            backgroundImage: `url(${img})`,
+            opacity: index === currentBgIndex ? 1 : 0,
+            zIndex: 0,
+          }}
+        />
+      ))}
       
+      {/* 遮罩层，确保文字清晰 */}
+      <div style={styles.overlay} />
+
       <Card style={styles.card}>
+        <div style={styles.header}>
+            <div style={styles.logoContainer}>
+                <Logo height={80} type="icon" />
+            </div>
+            <Title level={3} style={styles.title}>高空车租赁管理系统</Title>
+            <Text type="secondary" style={styles.subtitle}>欢迎回来，请登录您的账号</Text>
+        </div>
+
         <Form
           form={form}
           layout="vertical"
           onFinish={handleSubmit}
           autoComplete="off"
+          size="large"
         >
           <Form.Item
-            label="用户名"
             name="username"
             rules={[
               { required: true, message: '请输入用户名' },
@@ -58,15 +110,13 @@ const LoginPage: React.FC = () => {
             ]}
           >
             <Input
-              prefix={<UserOutlined className="site-form-item-icon" />
-              }
-              placeholder="请输入用户名"
+              prefix={<UserOutlined className="site-form-item-icon" style={{ color: '#bfbfbf' }} />}
+              placeholder="用户名"
               autoFocus
             />
           </Form.Item>
           
           <Form.Item
-            label="密码"
             name="password"
             rules={[
               { required: true, message: '请输入密码' },
@@ -74,9 +124,8 @@ const LoginPage: React.FC = () => {
             ]}
           >
             <Input.Password
-              prefix={<LockOutlined className="site-form-item-icon" />
-              }
-              placeholder="请输入密码"
+              prefix={<LockOutlined className="site-form-item-icon" style={{ color: '#bfbfbf' }} />}
+              placeholder="密码"
             />
           </Form.Item>
           
@@ -95,15 +144,15 @@ const LoginPage: React.FC = () => {
               block
               style={styles.button}
             >
-              {loading ? '登录中...' : '登录'}
+              {loading ? '登录中...' : '立即登录'}
             </Button>
           </Form.Item>
-          
-          <div style={styles.tips}>
-            <p>提示：默认超级管理员账号为 admin，密码为 admin123</p>
-          </div>
         </Form>
       </Card>
+      
+      <div style={styles.footer}>
+        <Text type="secondary" style={{ fontSize: '12px' }}>© 2025 高空车租赁管理系统 All Rights Reserved</Text>
+      </div>
     </div>
   );
 };
@@ -116,45 +165,84 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: '100vh',
-    backgroundColor: '#f0f2f5',
-    padding: '20px',
+    position: 'relative',
+    overflow: 'hidden',
+    // background removed, handled by bgLayer
   },
-  header: {
-    textAlign: 'center',
-    marginBottom: '30px',
+  bgLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+    transition: 'opacity 1s ease-in-out',
   },
-  title: {
-    fontSize: '28px',
-    fontWeight: 'bold',
-    color: '#1890ff',
-    marginBottom: '10px',
-  },
-  subtitle: {
-    fontSize: '16px',
-    color: '#666',
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)', // 半透明遮罩
+    zIndex: 1,
+    backdropFilter: 'blur(3px)', // 轻微磨砂效果
   },
   card: {
     width: '100%',
-    maxWidth: '400px',
-    padding: '24px',
-    borderRadius: '8px',
-    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+    maxWidth: '440px',
+    padding: '40px',
+    borderRadius: '16px',
+    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2)',
+    backgroundColor: 'rgba(255, 255, 255, 0.95)', // 稍微透明的白色背景
+    zIndex: 2, // 确保在遮罩之上
+    position: 'relative',
+  },
+  header: {
+    textAlign: 'center',
+    marginBottom: '40px',
+  },
+  logoContainer: {
+    marginBottom: '16px',
+  },
+  logoIcon: {
+    fontSize: '48px',
+    color: '#1890ff',
+  },
+  title: {
+    marginBottom: '8px',
+    color: '#1f1f1f',
+    marginTop: 0,
+  },
+  subtitle: {
+    fontSize: '16px',
+    color: '#595959',
   },
   button: {
-    height: '40px',
+    height: '48px',
     fontSize: '16px',
+    fontWeight: 500,
+    marginTop: '10px',
+    borderRadius: '8px',
   },
   error: {
     color: '#ff4d4f',
-    marginBottom: '16px',
-    padding: '10px',
+    marginBottom: '24px',
+    padding: '12px',
     backgroundColor: '#fff2f0',
-    borderRadius: '4px',
+    borderRadius: '8px',
     textAlign: 'center',
+    fontSize: '14px',
+    border: '1px solid #ffccc7',
   },
-  tips: {
-    marginTop: '16px',
+  footer: {
+    marginTop: '40px',
     textAlign: 'center',
+    zIndex: 2,
+    position: 'relative',
+    color: 'rgba(255, 255, 255, 0.8)', // 页脚文字改为浅色
+    textShadow: '0 1px 2px rgba(0,0,0,0.5)',
   },
 };
 

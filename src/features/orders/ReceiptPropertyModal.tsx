@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Modal, Form, Input, Select, DatePicker, Upload, Button, Row, Col, Divider, Typography, message } from 'antd';
-import { UploadOutlined } from '@ant-design/icons';
+import { PlusOutlined } from '@ant-design/icons';
 import { useSelector, useDispatch } from 'react-redux';
 import type { AppDispatch } from '../../app/store';
 import { Order, ReceiptRecord } from './types';
@@ -173,7 +173,7 @@ const ReceiptPropertyModal: React.FC<ReceiptPropertyModalProps> = ({ open, order
                 });
               })}
             >
-              <Button icon={<UploadOutlined />}>上传附件</Button>
+              <Button icon={<PlusOutlined />}>上传附件</Button>
             </Upload>
           </Form.Item>
           </>

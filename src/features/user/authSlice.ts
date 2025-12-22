@@ -1,119 +1,209 @@
-import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
+import { apiPost } from '../../api/client';
+import type { User, LoginCredentials } from './types';
+import * as sessionManager from '../../utils/sessionManager';
 
-// 定义用户类型
-interface User {
-  id: string;
-  username: string;
-  role: string;
-  // 权限列表（可选），用于权限判断
-  permissions?: string[];
-}
-
-// 定义认证状态类型
 interface AuthState {
-  isAuthenticated: boolean;
   user: User | null;
+  token: string | null;
+  isAuthenticated: boolean;
   loading: boolean;
   error: string | null;
 }
 
-// 初始状态
+// 从 sessionStorage 恢复状态（关闭页面后会清除）
+function loadAuthState(): Pick<AuthState, 'user' | 'token' | 'isAuthenticated'> {
+  try {
+    const token = sessionManager.getAuthToken();
+    const user = sessionManager.getUserInfo();
+
+    if (token && user && sessionManager.isSessionValid()) {
+      return {
+        token,
+        user,
+        isAuthenticated: true,
+      };
+    }
+  } catch (error) {
+    console.error('[Auth] 加载会话状态失败:', error);
+  }
+
+  return {
+    token: null,
+    user: null,
+    isAuthenticated: false,
+  };
+}
+
 const initialState: AuthState = {
-  isAuthenticated: false,
-  user: null,
+  ...loadAuthState(),
   loading: false,
   error: null,
 };
 
-// 模拟登录API调用
-// 这里使用硬编码的管理员账号和密码：admin / admin123
-export const login = createAsyncThunk(
+/**
+ * 登录异步操作
+ */
+export const login = createAsyncThunk<
+  { user: User; token: string },
+  LoginCredentials,
+  { rejectValue: string }
+>(
   'auth/login',
-  async ({ username, password }: { username: string; password: string }) => {
-    // 优化：减少模拟API请求延迟以提升用户体验
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    // 验证用户名和密码
-    if (username === 'admin' && password === 'admin123') {
-      // 登录成功，返回用户信息
-      return {
-        id: '1',
-        username: 'admin',
-        role: 'superadmin',
-        // 为超级管理员赋予所有关键权限
-        permissions: [
-          '合同管理-删除',
-          '合同管理-编辑',
-          '合同管理-结算',
-          '设备管理-编辑',
-          '设备管理-删除'
-        ]
-      };
-    } else {
-      // 登录失败，抛出错误
-      throw new Error('用户名或密码错误');
+  async (credentials, { rejectWithValue }) => {
+    try {
+      const response = await apiPost<{ user: User; token: string }>(
+        '/auth/login',
+        credentials
+      );
+
+      // 调试：查看登录响应
+      console.log('[Auth] 登录响应:', response);
+      console.log('[Auth] 用户信息:', response.user);
+      console.log('[Auth] 公司名称:', response.user?.companyName);
+
+      // 保存 token 和用户信息到 sessionStorage（关闭页面后会清除）
+      sessionManager.setAuthToken(response.token);
+      sessionManager.setUserInfo(response.user);
+
+      return response;
+    } catch (error: any) {
+      return rejectWithValue(error.message || 'Login failed');
     }
   }
 );
 
-// 退出登录
-export const logout = createAsyncThunk('auth/logout', async () => {
-  // 模拟退出登录的API调用
-  await new Promise(resolve => setTimeout(resolve, 300));
-  return true;
-});
+/**
+ * 登出操作
+ */
+export const logout = createAsyncThunk<void, void, { rejectValue: string }>(
+  'auth/logout',
+  async (_, { rejectWithValue }) => {
+    try {
+      // 调用后端登出接口（可选）
+      try {
+        await apiPost('/auth/logout', {});
+      } catch (e) {
+        // 即使后端登出失败也继续清除本地状态
+        console.warn('Backend logout failed:', e);
+      }
 
-// 创建auth slice
+      // 清除会话认证信息
+      sessionManager.clearAuth();
+    } catch (error: any) {
+      return rejectWithValue(error.message || 'Logout failed');
+    }
+  }
+);
+
+/**
+ * 刷新用户信息
+ */
+export const refreshUser = createAsyncThunk<User, void, { rejectValue: string }>(
+  'auth/refreshUser',
+  async (_, { rejectWithValue }) => {
+    try {
+      const user = await apiPost<User>('/auth/me', {});
+      sessionManager.setUserInfo(user);
+      return user;
+    } catch (error: any) {
+      // Token 可能已过期
+      sessionManager.clearAuth();
+      return rejectWithValue(error.message || 'Failed to refresh user info');
+    }
+  }
+);
+
 const authSlice = createSlice({
   name: 'auth',
   initialState,
   reducers: {
-    // 清除错误信息
+    // 清除错误
     clearError: (state) => {
       state.error = null;
-    }
+    },
+    // 手动设置用户（用于注册后自动登录等场景）
+    setUser: (state, action: PayloadAction<{ user: User; token: string }>) => {
+      state.user = action.payload.user;
+      state.token = action.payload.token;
+      state.isAuthenticated = true;
+      state.error = null;
+
+      sessionManager.setAuthToken(action.payload.token);
+      sessionManager.setUserInfo(action.payload.user);
+    },
+    // 更新用户信息（不改变token）
+    updateUser: (state, action: PayloadAction<Partial<User>>) => {
+      if (state.user) {
+        state.user = { ...state.user, ...action.payload };
+        sessionManager.setUserInfo(state.user);
+      }
+    },
   },
   extraReducers: (builder) => {
+    // 登录
     builder
-      // 处理登录请求开始
       .addCase(login.pending, (state) => {
         state.loading = true;
         state.error = null;
       })
-      // 处理登录成功
       .addCase(login.fulfilled, (state, action) => {
         state.loading = false;
+        state.user = action.payload.user;
+        state.token = action.payload.token;
         state.isAuthenticated = true;
-        state.user = action.payload;
-        // 保存用户信息到localStorage，确保JSON序列化正确
-        try {
-          localStorage.setItem('user', JSON.stringify(action.payload));
-          // 可选：设置认证标志，便于快速检查
-          localStorage.setItem('isAuthenticated', 'true');
-        } catch (error) {
-          console.error('保存用户信息到localStorage失败:', error);
-        }
+        state.error = null;
       })
-      // 处理登录失败
       .addCase(login.rejected, (state, action) => {
         state.loading = false;
-        state.isAuthenticated = false;
         state.user = null;
-        state.error = action.error.message || '登录失败';
+        state.token = null;
+        state.isAuthenticated = false;
+        state.error = action.payload || 'Login failed';
+      });
+
+    // 登出
+    builder
+      .addCase(logout.pending, (state) => {
+        state.loading = true;
       })
-      // 处理退出登录成功
       .addCase(logout.fulfilled, (state) => {
-        state.isAuthenticated = false;
+        state.loading = false;
         state.user = null;
-        // 从localStorage中移除用户信息和认证标志
-        localStorage.removeItem('user');
-        localStorage.removeItem('isAuthenticated');
+        state.token = null;
+        state.isAuthenticated = false;
+        state.error = null;
+      })
+      .addCase(logout.rejected, (state, action) => {
+        state.loading = false;
+        // 即使登出失败也清除状态
+        state.user = null;
+        state.token = null;
+        state.isAuthenticated = false;
+        state.error = action.payload || 'Logout failed';
+      });
+
+    // 刷新用户信息
+    builder
+      .addCase(refreshUser.pending, (state) => {
+        state.loading = true;
+      })
+      .addCase(refreshUser.fulfilled, (state, action) => {
+        state.loading = false;
+        state.user = action.payload;
+        state.error = null;
+      })
+      .addCase(refreshUser.rejected, (state, action) => {
+        state.loading = false;
+        // Token 过期或无效，清除认证状态
+        state.user = null;
+        state.token = null;
+        state.isAuthenticated = false;
+        state.error = action.payload || 'Failed to refresh user info';
       });
   },
 });
 
-// 导出actions
-export const { clearError } = authSlice.actions;
-
-// 导出reducer
+export const { clearError, setUser, updateUser } = authSlice.actions;
 export default authSlice.reducer;
+

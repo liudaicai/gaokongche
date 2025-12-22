@@ -1,0 +1,13 @@
+数据库Schema文件
+
+由于baseline_v1.0.sql文件较大（约2100行），请直接使用：
+
+源文件位置：
+d:\kaifa\4\sql\mysql\baseline_v1.0.sql
+
+部署时：
+1. 直接执行该文件
+2. 或复制内容到部署服务器
+
+命令：
+mysql -u root -p gaokongche < d:/kaifa/4/sql/mysql/baseline_v1.0.sql

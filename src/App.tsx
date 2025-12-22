@@ -1,9 +1,11 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Layout, Menu, Tabs, message, Avatar, Dropdown, Typography, theme, Space, Badge, Button, Tooltip } from 'antd';
+import { Layout, Menu, Tabs, message, Avatar, Dropdown, Typography, theme, Space, Badge, Button, Tooltip, Modal, Form, Input, App as AntApp } from 'antd';
 import { logout } from './features/user/authSlice';
 import type { RootState, AppDispatch } from './app/store';
 import { useNavigate, useLocation } from 'react-router-dom';
+import Logo from './components/common/Logo';
+import * as sessionManager from './utils/sessionManager';
 import {
   UserOutlined,
   DatabaseOutlined,
@@ -22,7 +24,11 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   SettingOutlined,
-  QuestionCircleOutlined
+  QuestionCircleOutlined,
+  ShoppingCartOutlined,
+  KeyOutlined,
+  CheckCircleOutlined,
+  TeamOutlined
 } from '@ant-design/icons';
 import { ProfileOutlined } from '@ant-design/icons';
 
@@ -39,22 +45,31 @@ const EquipmentTransfer = lazy(() => import('./features/equipment/EquipmentTrans
 const LogisticsManagement = lazy(() => import('./features/logistics/LogisticsManagement'));
 const LogisticsLedger = lazy(() => import('./features/logistics/LogisticsLedger'));
 const LogisticsLedgerPage = lazy(() => import('./features/logistics/LogisticsLedgerPage'));
-const EmployeeList = lazy(() => import('./features/employees/EmployeeList'));
 const StoreList = lazy(() => import('./features/stores/StoreList'));
 const CompanyVerificationList = lazy(() => import('./features/stores/CompanyVerification'));
 const OrderList = lazy(() => import('./features/orders/OrderList'));
 const TemplateManagement = lazy(() => import('./features/templates/TemplateManagement'));
 const TemplateMapping = lazy(() => import('./features/templates/TemplateMapping'));
 const ModelManagement = lazy(() => import('./features/equipment/ModelManagement'));
+const PartsManagement = lazy(() => import('./features/parts/PartsManagement'));
 const EquipmentRepairsPage = lazy(() => import('./features/repairs/EquipmentRepairsPage'));
-const AccessoriesManagement = lazy(() => import('./features/accessories/components/AccessoriesManagement'));
-const SmartAccessoryFinder = lazy(() => import('./features/accessories/components/SmartAccessoryFinder'));
 const FinanceManagement = lazy(() => import('./features/finance/components/FinanceManagement'));
 const PolicyManagement = lazy(() => import('./features/policies/components/PolicyManagement'));
 const SubleaseCompanyPage = lazy(() => import('./features/sublease/SubleaseCompanyPage'));
 const SubleaseEquipmentPage = lazy(() => import('./features/sublease/SubleaseEquipmentPage'));
 const SubleaseCreatePage = lazy(() => import('./features/sublease/SubleaseCreatePage'));
-const CompaniesManagement = lazy(() => import('./features/companies/CompaniesManagement'));
+// const CompaniesManagement = lazy(() => import('./features/companies/CompaniesManagement')); // 已禁用公司管理
+const ReminderCenter = lazy(() => import('./features/reminders/components/ReminderCenter'));
+const UserSettingsPage = lazy(() => import('./features/reminders/components/UserSettingsPage'));
+const PartReplacementManager = lazy(() => import('./features/equipment/components/PartReplacementManager'));
+const EquipmentUsageAnalysis = lazy(() => import('./features/equipment/components/EquipmentUsageAnalysis'));
+const Dashboard = lazy(() => import('./features/dashboard/Dashboard'));
+const PurchasesPage = lazy(() => import('./features/purchases/PurchasesPage'));
+const RolePermissionManager = lazy(() => import('./features/permissions/RolePermissionManager'));
+const UserPermissionManager = lazy(() => import('./features/permissions/UserPermissionManager'));
+const ApprovalCenter = lazy(() => import('./features/approvals/ApprovalCenter'));
+const OrganizationManagement = lazy(() => import('./features/organization/OrganizationManagement'));
+const EquipmentRentStatsPage = lazy(() => import('./features/equipment-stats/EquipmentRentStatsPage'));
 
 const { Sider, Content, Header } = Layout;
 
@@ -63,7 +78,10 @@ export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useSelector((state: RootState) => state.auth);
+  const unreadCount = useSelector((state: RootState) => state.reminders?.unreadCount || 0);
   const [collapsed, setCollapsed] = useState(false);
+  const [changePasswordVisible, setChangePasswordVisible] = useState(false);
+  const [changePasswordForm] = Form.useForm();
 
   // 使用 Token 获取主题变量
   const {
@@ -103,21 +121,21 @@ export default function App() {
     // ... (保持原有映射逻辑不变，为了简洁省略部分重复代码，实际运行时需要完整映射)
     const map: Record<string, string> = {
       'home': '首页',
+      'approvalCenter': '审批中心',
+      'organizationManagement': '组织管理',
       'customerList': '客户管理',
       'equipmentProfile': '设备档案',
       'equipmentInventory': '设备库存',
       'equipmentTransfer': '设备调拨',
-      'accessoriesManagement': '配件档案',
-      'accessoryFinder': '智能配件查找',
+      'partsManagement': '配件管理',
       'modelManagement': '型号管理',
       'financeManagement': '财务管理',
       'policyManagement': '设备保单',
       'logisticsList': '物流管理',
       'logisticsLedger': '物流台账',
-      'employeeList': '员工管理',
       'storeList': '门店管理',
       'companyVerificationList': '公司认证',
-      'companiesManagement': '公司管理',
+      // 'companiesManagement': '公司管理', // 已移除
       'subleaseCompanyList': '转租公司',
       'subleaseEquipmentList': '转租设备',
       'sublease-create': '新增转租',
@@ -126,7 +144,13 @@ export default function App() {
       'templateMapping': '模板映射',
       'orderList': '订单管理',
       'reminderCenter': '提醒中心',
-      'equipmentRepairs': '设备维修'
+      'reminderSettings': '提醒设置',
+      'equipmentRepairs': '设备维修',
+      'partReplacements': '配件更换记录',
+      'usageAnalysis': '使用率分析',
+      'purchases': '采购记录',
+      'rolePermissions': '角色权限',
+      'userPermissions': '用户权限'
     };
     return map[key] || '未命名';
   };
@@ -153,6 +177,47 @@ export default function App() {
       navigate('/login', { replace: true });
     } catch (error) {
       message.error('退出登录失败');
+    }
+  };
+
+  // 处理密码修改
+  const handleChangePassword = async () => {
+    try {
+      const values = await changePasswordForm.validateFields();
+      const token = localStorage.getItem('token') || localStorage.getItem('auth_token');
+      
+      const response = await fetch('/api/users/me/change-password', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          oldPassword: values.oldPassword,
+          newPassword: values.newPassword,
+        }),
+      });
+
+      const result = await response.json();
+      
+      if (result.ok) {
+        message.success('密码修改成功，请重新登录');
+        setChangePasswordVisible(false);
+        changePasswordForm.resetFields();
+        // 3秒后自动退出登录
+        setTimeout(async () => {
+          await dispatch(logout()).unwrap();
+          navigate('/login', { replace: true });
+        }, 3000);
+      } else {
+        message.error(result.error || '密码修改失败');
+      }
+    } catch (err: any) {
+      if (err.errorFields) {
+        // 表单验证错误，不显示消息
+        return;
+      }
+      message.error(err.message || '操作失败');
     }
   };
 
@@ -224,72 +289,50 @@ export default function App() {
 
   useEffect(() => {
     const stop = initRealtime();
-    return () => { stop?.(); message.destroy(); };
-  }, []);
+    // 加载未读提醒数量
+    import('./features/reminders/remindersSlice').then(module => {
+      dispatch(module.fetchUnreadCount());
+    });
+
+    // 初始化会话管理器（15分钟无操作自动登出）
+    const handleSessionTimeout = () => {
+      message.warning('您已15分钟未操作，系统将自动退出登录', 3);
+      setTimeout(() => {
+        dispatch(logout());
+        navigate('/login', { replace: true });
+      }, 3000);
+    };
+    sessionManager.initSessionManager(handleSessionTimeout);
+    console.log('[App] 会话管理器已启动：15分钟无操作自动登出，关闭页面需重新登录');
+
+    return () => { 
+      stop?.(); 
+      message.destroy(); 
+      sessionManager.destroySessionManager();
+    };
+  }, [dispatch, navigate]);
 
   const getTabComponent = (key: string) => {
     // 映射逻辑保持不变，直接复用原有的 switch-case
     // 为了代码简洁，这里直接调用原有的映射
     switch (key) {
       case 'home':
-        return (
-          <div style={{ padding: '24px', maxWidth: 1200, margin: '0 auto' }}>
-            <div style={{ marginBottom: 32 }}>
-              <Title level={2} style={{ margin: 0 }}>欢迎回来，{user?.username}</Title>
-              <Text type="secondary">今天是 {new Date().toLocaleDateString()}</Text>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '24px', marginBottom: '32px' }}>
-              {/* Dashboard Cards */}
-              <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
-                <Text type="secondary">设备总数</Text>
-                <div style={{ fontSize: '32px', fontWeight: 'bold', color: '#1677ff', marginTop: 8 }}>100</div>
-              </div>
-              <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
-                <Text type="secondary">客户总数</Text>
-                <div style={{ fontSize: '32px', fontWeight: 'bold', color: '#52c41a', marginTop: 8 }}>50</div>
-              </div>
-              <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
-                <Text type="secondary">待处理订单</Text>
-                <div style={{ fontSize: '32px', fontWeight: 'bold', color: '#faad14', marginTop: 8 }}>12</div>
-              </div>
-              <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
-                <Text type="secondary">今日租赁</Text>
-                <div style={{ fontSize: '32px', fontWeight: 'bold', color: '#eb2f96', marginTop: 8 }}>5</div>
-              </div>
-            </div>
-            <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
-              <Title level={4}>最近活动</Title>
-              <ul style={{ listStyle: 'none', padding: 0, marginTop: 16 }}>
-                {[
-                  '用户 admin 登录系统',
-                  '设备 ID-001 状态更新为可出租',
-                  '客户 ABC公司 创建新订单',
-                  '配件库存更新',
-                  '系统维护任务完成'
-                ].map((item, i) => (
-                  <li key={i} style={{ padding: '12px 0', borderBottom: i < 4 ? '1px solid #f0f0f0' : 'none', color: '#666' }}>
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        );
+        return <Dashboard />;
+      case 'approvalCenter': return <ApprovalCenter />;
+      case 'organizationManagement': return <OrganizationManagement />;
       case 'customerList': return <CustomerList />;
       case 'equipmentProfile': return <EquipmentProfile />;
       case 'equipmentInventory': return <EquipmentInventory />;
       case 'equipmentTransfer': return <EquipmentTransfer />;
-      case 'accessoriesManagement': return <AccessoriesManagement />;
-      case 'accessoryFinder': return <SmartAccessoryFinder />;
+      case 'partsManagement': return <PartsManagement />;
       case 'modelManagement': return <ModelManagement />;
       case 'financeManagement': return <FinanceManagement />;
       case 'policyManagement': return <PolicyManagement />;
       case 'logisticsList': return <LogisticsManagement />;
       case 'logisticsLedger': return <LogisticsLedgerPage />;
-      case 'employeeList': return <EmployeeList />;
       case 'storeList': return <StoreList />;
       case 'companyVerificationList': return <CompanyVerificationList />;
-      case 'companiesManagement': return <CompaniesManagement />;
+      // case 'companiesManagement': return <CompaniesManagement />; // 已移除
       case 'subleaseCompanyList': return <SubleaseCompanyPage />;
       case 'subleaseEquipmentList': return <SubleaseEquipmentPage />;
       case 'sublease-create': return <SubleaseCreatePage />;
@@ -297,7 +340,21 @@ export default function App() {
       case 'templateManagement': return <TemplateManagement />;
       case 'templateMapping': return <TemplateMapping />;
       case 'equipmentRepairs': return <EquipmentRepairsPage />;
-      case 'reminderCenter': return <div style={{ padding: 24 }}>提醒中心开发中...</div>;
+      case 'reminderCenter': return <ReminderCenter />;
+      case 'reminderSettings': return <UserSettingsPage />;
+      case 'partReplacements': 
+        // 从URL参数获取equipmentId，如果没有则显示提示
+        const equipmentId = new URLSearchParams(location.search).get('equipmentId');
+        return equipmentId ? <PartReplacementManager equipmentId={parseInt(equipmentId)} /> : 
+          <div style={{ padding: 24 }}>请从设备档案中打开此页面</div>;
+      case 'usageAnalysis':
+        const usageEquipmentId = new URLSearchParams(location.search).get('equipmentId');
+        return usageEquipmentId ? <EquipmentUsageAnalysis equipmentId={parseInt(usageEquipmentId)} /> :
+          <div style={{ padding: 24 }}>请从设备档案中打开此页面</div>;
+      case 'purchases': return <PurchasesPage />;
+      case 'equipmentRentStats': return <EquipmentRentStatsPage />;
+      case 'rolePermissions': return <RolePermissionManager />;
+      case 'userPermissions': return <UserPermissionManager />;
       default: return <div>功能开发中</div>;
     }
   };
@@ -329,33 +386,36 @@ export default function App() {
         { key: 'equipmentProfile', label: '设备档案' },
         { key: 'equipmentInventory', label: '设备库存' },
         { key: 'equipmentTransfer', label: '设备调拨' },
-        { key: 'accessoriesManagement', label: '配件档案' },
-        { key: 'accessoryFinder', label: '智能配件查找' },
+        { key: 'partsManagement', label: '配件管理' },
         { key: 'modelManagement', label: '型号管理' },
         { key: 'equipmentRepairs', label: '设备维修' },
         { key: 'policyManagement', label: '设备保单' },
       ]
     },
+    { key: 'purchases', icon: <ShoppingCartOutlined />, label: '采购记录' },
     { key: 'orders', icon: <FileDoneOutlined />, label: '订单管理', children: [{ key: 'orderList', label: '订单列表' }] },
+    { key: 'approvals', icon: <CheckCircleOutlined />, label: '审批中心', children: [{ key: 'approvalCenter', label: '审批中心' }] },
     { key: 'logistics', icon: <TruckOutlined />, label: '物流管理', children: [{ key: 'logisticsList', label: '物流列表' }, { key: 'logisticsLedger', label: '物流台账' }] },
-    { key: 'finance', icon: <DollarOutlined />, label: '财务管理', children: [{ key: 'financeManagement', label: '财务总览' }] },
-    { key: 'employees', icon: <UserAddOutlined />, label: '员工管理', children: [{ key: 'employeeList', label: '员工列表' }] },
+    { key: 'finance', icon: <DollarOutlined />, label: '财务管理', children: [{ key: 'financeManagement', label: '财务总览' }, { key: 'equipmentRentStats', label: '租金统计' }] },
     { key: 'stores', icon: <ShopOutlined />, label: '门店管理', children: [{ key: 'storeList', label: '门店列表' }, { key: 'companyVerificationList', label: '公司认证' }] },
     { key: 'sublease', icon: <SwapOutlined />, label: '转租管理', children: [{ key: 'subleaseCompanyList', label: '转租公司' }, { key: 'subleaseEquipmentList', label: '转租设备' }] },
     { key: 'templates', icon: <ProfileOutlined />, label: '模板管理', children: [{ key: 'templateManagement', label: '模板管理' }, { key: 'templateMapping', label: '模板映射' }] },
     { key: 'reminders', icon: <BellOutlined />, label: '提醒中心', children: [{ key: 'reminderCenter', label: '提醒中心' }] },
+    { key: 'organization', icon: <TeamOutlined />, label: '组织管理', children: [{ key: 'organizationManagement', label: '部门职务' }] },
+    { key: 'permissions', icon: <KeyOutlined />, label: '权限管理', children: [{ key: 'rolePermissions', label: '角色权限' }, { key: 'userPermissions', label: '用户权限' }] },
   ];
 
-  // 超级管理员菜单
+  // 超级管理员菜单（已移除公司管理）
   const superAdminMenuItems = isSuperAdmin ? [
-    { key: 'system', icon: <SettingOutlined />, label: '系统管理', children: [{ key: 'companiesManagement', label: '公司管理' }] },
+    // { key: 'system', icon: <SettingOutlined />, label: '系统管理', children: [{ key: 'companiesManagement', label: '公司管理' }] },
   ] : [];
 
   const menuItems = [...baseMenuItems, ...superAdminMenuItems];
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
-      <Sider
+    <AntApp>
+      <Layout style={{ minHeight: '100vh' }}>
+        <Sider
         width={220}
         trigger={null}
         collapsible
@@ -379,14 +439,14 @@ export default function App() {
           transition: 'all 0.3s',
           padding: collapsed ? '8px' : '12px'
         }}>
-          <img
-            src="/logo.png"
-            alt="Logo"
-            style={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'contain',
-              transition: 'all 0.3s'
+          <Logo 
+            type={collapsed ? 'icon' : 'full'}
+            theme="dark"
+            height={collapsed ? 32 : 40}
+            style={{ 
+              transition: 'all 0.3s',
+              transform: collapsed ? 'scale(1.1)' : 'scale(1)',
+              width: collapsed ? 'auto' : '100%'
             }}
           />
         </div>
@@ -430,14 +490,18 @@ export default function App() {
               <QuestionCircleOutlined style={{ fontSize: 18, cursor: 'pointer', color: '#666' }} />
             </Tooltip>
             <Tooltip title="消息通知">
-              <Badge count={5} size="small">
-                <BellOutlined style={{ fontSize: 18, cursor: 'pointer', color: '#666' }} />
+              <Badge count={unreadCount} size="small">
+                <BellOutlined 
+                  style={{ fontSize: 18, cursor: 'pointer', color: '#666' }} 
+                  onClick={() => handleMenuClick({ key: 'reminderCenter' })}
+                />
               </Badge>
             </Tooltip>
             <Dropdown
               menu={{
                 items: [
-                  { key: 'setting', label: '个人设置', icon: <SettingOutlined /> },
+                  { key: 'reminderSettings', label: '提醒设置', icon: <SettingOutlined />, onClick: () => handleMenuClick({ key: 'reminderSettings' }) },
+                  { key: 'changePassword', label: '密码修改', icon: <KeyOutlined />, onClick: () => setChangePasswordVisible(true) },
                   { type: 'divider' },
                   { key: 'logout', label: '退出登录', icon: <LogoutOutlined />, onClick: handleLogout }
                 ]
@@ -474,6 +538,75 @@ export default function App() {
           </TabsContext.Provider>
         </Content>
       </Layout>
+
+      {/* 密码修改Modal */}
+      <Modal
+        title="修改密码"
+        open={changePasswordVisible}
+        onOk={handleChangePassword}
+        onCancel={() => {
+          setChangePasswordVisible(false);
+          changePasswordForm.resetFields();
+        }}
+        okText="确定"
+        cancelText="取消"
+        width={500}
+      >
+        <Form
+          form={changePasswordForm}
+          layout="vertical"
+          autoComplete="off"
+        >
+          <Form.Item
+            label="旧密码"
+            name="oldPassword"
+            rules={[
+              { required: true, message: '请输入旧密码' }
+            ]}
+          >
+            <Input.Password placeholder="请输入当前密码" autoComplete="off" />
+          </Form.Item>
+
+          <Form.Item
+            label="新密码"
+            name="newPassword"
+            rules={[
+              { required: true, message: '请输入新密码' },
+              { min: 8, message: '密码长度不能少于8位' },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (!value || getFieldValue('oldPassword') !== value) {
+                    return Promise.resolve();
+                  }
+                  return Promise.reject(new Error('新密码不能与旧密码相同'));
+                },
+              }),
+            ]}
+          >
+            <Input.Password placeholder="请输入新密码（至少8位）" autoComplete="new-password" />
+          </Form.Item>
+
+          <Form.Item
+            label="确认新密码"
+            name="confirmPassword"
+            dependencies={['newPassword']}
+            rules={[
+              { required: true, message: '请确认新密码' },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (!value || getFieldValue('newPassword') === value) {
+                    return Promise.resolve();
+                  }
+                  return Promise.reject(new Error('两次输入的密码不一致'));
+                },
+              }),
+            ]}
+          >
+            <Input.Password placeholder="请再次输入新密码" autoComplete="new-password" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </Layout>
+    </AntApp>
   );
 }

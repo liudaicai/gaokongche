@@ -9,13 +9,14 @@ const toNum = (x: any): number => {
 
 /**
  * Calculate rent for a single unit over the given rental days.
- * Rules:
- * 1) First month (first 30 days):
- *    - If both daily and monthly exist: use min(dailyRate * firstDays, monthlyRate)
- *      (if daily*days > monthly, charge whole monthly; minimum billing cycle is one month).
- *    - If daily missing but monthly exists: charge monthlyRate for the first 30 days.
- * 2) Beyond first month: use (monthlyRate / 30) * remainingDays
- * 3) If monthly missing: fallback to dailyRate * rentalDays (or 0 if daily missing)
+ * Updated Rules (新规则):
+ * 1) Compare dailyRate * rentalPeriod with monthlyRate:
+ *    - If daily total > monthly: Use monthly rate calculation
+ *      * First month (≤30 days): Minimum charge is full monthlyRate
+ *      * After first month: monthlyRate + (monthlyRate / 30) * (days - 30)
+ *    - If daily total ≤ monthly: Use dailyRate * rentalPeriod
+ * 2) If monthly rate is missing: fallback to dailyRate * rentalDays
+ * 3) If daily rate is missing: fallback to monthlyRate calculation
  */
 export function calculateRentForPeriod(
   dailyRate?: number,
@@ -32,17 +33,32 @@ export function calculateRentForPeriod(
     return Number((daily * days).toFixed(2));
   }
 
-  const firstDays = Math.min(days, 30);
-  let firstMonthRent = monthly; // default if no daily
-  if (daily > 0) {
-    firstMonthRent = Math.min(daily * firstDays, monthly);
+  // No daily: fallback to monthly calculation
+  if (daily <= 0) {
+    if (days <= 30) {
+      return Number(monthly.toFixed(2));
+    }
+    const total = monthly + ((monthly / 30) * (days - 30));
+    return Number(total.toFixed(2));
   }
 
-  const remainingDays = Math.max(days - 30, 0);
-  const remainingRent = (monthly / 30) * remainingDays;
-
-  const total = firstMonthRent + remainingRent;
-  return Number(total.toFixed(2));
+  // Compare daily total with monthly rate
+  const dailyTotal = daily * days;
+  
+  if (dailyTotal > monthly) {
+    // Use monthly rate calculation
+    if (days <= 30) {
+      // First month: minimum charge is full monthly rate
+      return Number(monthly.toFixed(2));
+    } else {
+      // After first month: monthly + (monthly/30) * remaining days
+      const total = monthly + ((monthly / 30) * (days - 30));
+      return Number(total.toFixed(2));
+    }
+  } else {
+    // Use daily rate
+    return Number(dailyTotal.toFixed(2));
+  }
 }
 
 export type PricingLogEntry = {
@@ -52,11 +68,15 @@ export type PricingLogEntry = {
 };
 
 /**
- * Calculate rent with an audit log according to business rules:
- * - When equipment has not exited: use (monthlyRate / 30) * rentalDays (no first-month comparison)
- * - When exited within first 30 days from entry: compare daily*days vs monthly (minimum one full month if monthly chosen)
- * - When exited after 30 days: first 30 days apply min(daily*firstDays, monthly), remainder monthly/30
- * - Round to 2 decimals at the end; keep intermediate values in log.
+ * Calculate rent with an audit log according to NEW business rules:
+ * 新租金计算逻辑：
+ * 1) 比较 日租价*租期 与 月租价：
+ *    - 如果 日租总额 > 月租价：使用月租价计算
+ *      * 第一个月（≤30天）：最小收费为一个月租价
+ *      * 超过一个月：月租价 + (月租价/30) * (天数-30)
+ *    - 如果 日租总额 ≤ 月租价：使用日租价 * 租期
+ * 2) 其他费用按实际金额计算
+ * 3) Round to 2 decimals at the end; keep intermediate values in log.
  */
 export function calculateRentWithAudit(params: {
   dailyRate?: number;
@@ -78,66 +98,77 @@ export function calculateRentWithAudit(params: {
     return { amount: 0, log };
   }
 
+  // No monthly: fallback to daily pricing only
   if (monthly <= 0) {
     const amt = Number((daily * days).toFixed(2));
     log.push({ step: 'no_monthly', details: '无月租价，按日租计算', values: { amount: amt } });
     return { amount: amt, log };
   }
 
-  if (!params.hasExited) {
-    const amt = Number(((monthly / 30) * days).toFixed(2));
-    log.push({ step: 'not_exited', details: '未退场，按月租/30*天数计算', values: { amount: amt } });
-    return { amount: amt, log };
-  }
-
-  // Determine if exited within 30 days from entry (inclusive)
-  let exitedWithinFirstMonth = false;
-  if (params.entryDate && params.exitDate) {
-    try {
-      const entry = new Date(params.entryDate);
-      const exit = new Date(params.exitDate);
-      const msPerDay = 24 * 60 * 60 * 1000;
-      const diffDays = Math.floor((exit.setHours(23,59,59,999) - new Date(entry.setHours(0,0,0,0)).getTime()) / msPerDay) + 1;
-      exitedWithinFirstMonth = diffDays <= 30;
-      log.push({ step: 'diff', details: '进退场间隔天数', values: { diffDays } });
-    } catch {
-      // Fallback: use rentalDays as proxy
-      exitedWithinFirstMonth = days <= 30;
-      log.push({ step: 'diff_fallback', details: '日期解析失败，使用租期判断', values: { days } });
+  // No daily: fallback to monthly calculation
+  if (daily <= 0) {
+    let amt: number;
+    if (days <= 30) {
+      amt = Number(monthly.toFixed(2));
+      log.push({ step: 'no_daily_first_month', details: '无日租价，第一个月收取月租价', values: { amount: amt } });
+    } else {
+      amt = Number((monthly + ((monthly / 30) * (days - 30))).toFixed(2));
+      log.push({ step: 'no_daily_beyond_month', details: '无日租价，按月租价 + (月租价/30)*超出天数', values: { amount: amt, beyondDays: days - 30 } });
     }
-  } else {
-    exitedWithinFirstMonth = days <= 30;
-    log.push({ step: 'diff_missing', details: '缺少日期，使用租期判断', values: { days } });
-  }
-
-  if (exitedWithinFirstMonth) {
-    const dailyTotal = daily * days;
-    const chosen = Math.min(dailyTotal, monthly);
-    const amt = Number(chosen.toFixed(2));
-    log.push({ step: 'first_month_exit', details: '首月退场，比较日租与月租，取较小者', values: { dailyTotal: Number(dailyTotal.toFixed(2)), monthly, amount: amt } });
     return { amount: amt, log };
   }
 
-  // Exited after first month: segment calculation
-  const firstDays = Math.min(days, 30);
-  const firstMonthDaily = daily * firstDays;
-  const firstMonthRent = Math.min(firstMonthDaily, monthly);
-  const remainingDays = Math.max(days - 30, 0);
-  const remainingRent = (monthly / 30) * remainingDays;
-  const total = Number((firstMonthRent + remainingRent).toFixed(2));
+  // Compare daily total with monthly rate
+  const dailyTotal = daily * days;
+  
   log.push({
-    step: 'segmented',
-    details: '跨月分段：首月取min(日租*天, 月租)，余下按月租/30',
+    step: 'comparison',
+    details: '比较日租总额与月租价',
     values: {
-      firstDays,
-      firstMonthDaily: Number(firstMonthDaily.toFixed(2)),
-      firstMonthRent: Number(firstMonthRent.toFixed(2)),
-      remainingDays,
-      remainingRent: Number(remainingRent.toFixed(2)),
-      amount: total,
-    },
+      dailyTotal: Number(dailyTotal.toFixed(2)),
+      monthly,
+      useMonthly: dailyTotal > monthly ? 'yes' : 'no'
+    }
   });
-  return { amount: total, log };
+
+  if (dailyTotal > monthly) {
+    // Use monthly rate calculation
+    let amt: number;
+    if (days <= 30) {
+      // First month: minimum charge is full monthly rate
+      amt = Number(monthly.toFixed(2));
+      log.push({
+        step: 'monthly_first_month',
+        details: '日租总额 > 月租价，第一个月最小收费为一个月租价',
+        values: { days, monthlyRate: monthly, amount: amt }
+      });
+    } else {
+      // After first month: monthly + (monthly/30) * remaining days
+      const remainingDays = days - 30;
+      const remainingRent = (monthly / 30) * remainingDays;
+      amt = Number((monthly + remainingRent).toFixed(2));
+      log.push({
+        step: 'monthly_beyond_month',
+        details: '日租总额 > 月租价，超过一个月按：月租价 + (月租价/30)*超出天数',
+        values: {
+          firstMonthRent: monthly,
+          remainingDays,
+          remainingRent: Number(remainingRent.toFixed(2)),
+          amount: amt
+        }
+      });
+    }
+    return { amount: amt, log };
+  } else {
+    // Use daily rate
+    const amt = Number(dailyTotal.toFixed(2));
+    log.push({
+      step: 'daily_rate',
+      details: '日租总额 ≤ 月租价，使用日租价 * 租期',
+      values: { dailyRate: daily, days, amount: amt }
+    });
+    return { amount: amt, log };
+  }
 }
 
 /**

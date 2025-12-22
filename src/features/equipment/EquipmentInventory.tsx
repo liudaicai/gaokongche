@@ -3,6 +3,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { Input, Select, Table, Card, Statistic, Row, Col, Tag, Button } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { AppDispatch } from '../../app/store';
+import { getAuthHeaders } from '../../api/client';
 import {
   fetchInventoryStart,
   fetchInventorySuccess,
@@ -13,7 +14,6 @@ import {
   EquipmentInventory as EquipmentInventoryType
 } from './equipmentslice';
 
-const { Search } = Input;
 const { Option } = Select;
 
 const EquipmentInventory: React.FC = () => {
@@ -42,7 +42,10 @@ const EquipmentInventory: React.FC = () => {
       }
       const controller = new AbortController();
       abortRef.current = controller;
-      const response = await fetch('/api/equipments/inventory/stats', { signal: controller.signal });
+      const response = await fetch('/api/equipments/inventory/stats', { 
+        signal: controller.signal,
+        headers: getAuthHeaders()
+      });
       const result = await response.json();
       
       if (result.ok) {
@@ -95,14 +98,10 @@ const EquipmentInventory: React.FC = () => {
     };
   }, [fetchInventory]);
 
-  // 过滤数据（排除默认仓库和未指定仓库）
+  // 过滤数据
   useEffect(() => {
-    const excludedAreas = ['默认仓库', '未指定仓库'];
-    
     const filtered = (inventoryList as EquipmentInventoryType[]).filter((inventory: EquipmentInventoryType) => 
-      // 首先过滤掉默认仓库和未指定仓库
-      !excludedAreas.includes(inventory.area) &&
-      // 然后应用用户的筛选条件
+      // 应用用户的筛选条件
       (searchParams.area === '' || inventory.area.includes(searchParams.area)) &&
       (searchParams.height === '' || inventory.height.toString() === searchParams.height) &&
       (searchParams.type === '' || inventory.type === searchParams.type) &&
@@ -112,13 +111,12 @@ const EquipmentInventory: React.FC = () => {
     setFilteredList(filtered);
   }, [inventoryList, searchParams]);
 
-  // 获取所有可用的区域选项（过滤掉默认仓库和未指定仓库）
+  // 获取所有可用的区域选项
   const availableAreas = React.useMemo(() => {
     const areas = new Set<string>();
-    const excludedAreas = ['默认仓库', '未指定仓库'];
     
     (inventoryList as EquipmentInventoryType[]).forEach(item => {
-      if (item.area && !excludedAreas.includes(item.area)) {
+      if (item.area) {
         areas.add(item.area);
       }
     });
@@ -276,7 +274,7 @@ const EquipmentInventory: React.FC = () => {
             <Option value="直臂车">直臂车</Option>
             <Option value="曲臂车">曲臂车</Option>
           </Select>
-          <Search
+          <Input
             placeholder="品牌"
             allowClear
             style={{ width: 180 }}

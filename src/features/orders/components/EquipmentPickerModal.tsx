@@ -1,5 +1,5 @@
-import React, { useMemo, useState, useDeferredValue } from 'react';
-import { Modal, Table, Row, Col, Input, Select, Checkbox, Button, Typography, Tag, Progress } from 'antd';
+import React, { useMemo, useState } from 'react';
+import { Modal, Table, Row, Col, Select, Checkbox, Button, Typography, Tag, Progress } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { Equipment } from '../../equipment/equipmentslice';
 import { mapRentalStatus, renderEquipmentSource } from '../../equipment/utils';
@@ -23,28 +23,26 @@ interface Props {
   defaultStoreIds?: string[];
 }
 
-const EquipmentPickerModal: React.FC<Props> = ({ open, item, equipmentList, initialSelectedCodes, onCancel, onConfirm, allowedCodes, onlyWaitingDefault, forceWaitingOnly, storeList, defaultStoreIds }) => {
-  const [search, setSearch] = useState('');
-  const [onlyWaiting, setOnlyWaiting] = useState(onlyWaitingDefault ?? true);
-  const [filterBrand, setFilterBrand] = useState<string | undefined>(undefined);
-  const [filterModel, setFilterModel] = useState<string | undefined>(undefined);
-  const [filterWarehouses, setFilterWarehouses] = useState<string[]>([]);
-  const [filterStoreIds, setFilterStoreIds] = useState<string[]>(defaultStoreIds || []);
+const EquipmentPickerModal: React.FC<Props> = ({ open, item, equipmentList, initialSelectedCodes, onCancel, onConfirm, allowedCodes, onlyWaitingDefault, forceWaitingOnly, defaultStoreIds }) => {
+  // 修复：初始状态应该直接使用 onlyWaitingDefault，而不是在 useEffect 中再设置
+  const [onlyWaiting, setOnlyWaiting] = useState(forceWaitingOnly ? true : (onlyWaitingDefault ?? true));
+  const [filterHeight, setFilterHeight] = useState<string | undefined>(undefined); // 高度筛选
   const [selectedCodes, setSelectedCodes] = useState<string[]>(initialSelectedCodes || []);
 
-  // 当弹窗打开或默认值变化时，重置待租过滤默认值
+  // 弹窗打开时重置状态
   React.useEffect(() => {
-    if (forceWaitingOnly) {
-      setOnlyWaiting(true); // 强制设置为true
-    } else {
-      setOnlyWaiting(onlyWaitingDefault ?? true);
+    if (open) {
+      // 重置筛选条件
+      setFilterHeight(undefined);
+      setSelectedCodes(initialSelectedCodes || []);
+      // 重置待租过滤默认值
+      if (forceWaitingOnly) {
+        setOnlyWaiting(true);
+      } else {
+        setOnlyWaiting(onlyWaitingDefault ?? true);
+      }
     }
-  }, [onlyWaitingDefault, forceWaitingOnly, open]);
-
-  // 打开时同步默认门店筛选（按当前出库门店）
-  React.useEffect(() => {
-    setFilterStoreIds(defaultStoreIds || []);
-  }, [defaultStoreIds, open]);
+  }, [open, onlyWaitingDefault, forceWaitingOnly, initialSelectedCodes]);
 
   const requiredHeight = parseFloat(String(item.height ?? 0));
   const requiredCount = item.quantity || 0;
@@ -53,10 +51,11 @@ const EquipmentPickerModal: React.FC<Props> = ({ open, item, equipmentList, init
 
   const baseList = useMemo(() => {
     const list = Array.isArray(equipmentList) ? equipmentList : [];
-    const hasType = !!item.equipmentType;
+    // 修复：'全部' 表示不限类型，不应该作为过滤条件
+    const hasType = !!item.equipmentType && item.equipmentType !== '全部';
     const hasHeight = item.height !== undefined && String(item.height).length > 0;
     if (!hasType && !hasHeight) {
-      // 当未指定类型/高度时，返回全部设备列表（用于调拨场景）
+      // 当未指定类型/高度时，返回全部设备列表
       return list;
     }
     return list.filter(
@@ -64,49 +63,32 @@ const EquipmentPickerModal: React.FC<Props> = ({ open, item, equipmentList, init
     );
   }, [equipmentList, item.equipmentType, item.height, requiredHeight]);
 
-  const brandOptions = useMemo(() => Array.from(new Set(baseList.map(e => e.brand))).filter(Boolean), [baseList]);
-  const modelOptions = useMemo(() => Array.from(new Set(baseList.map(e => e.model))).filter(Boolean), [baseList]);
-  const warehouseOptions = useMemo(() => Array.from(new Set(baseList.map(e => e.warehouse))).filter(Boolean), [baseList]);
+  // 高度选项（所有场景通用）
+  const heightOptions = useMemo(() => Array.from(new Set(baseList.map(e => String(e.height)))).filter(Boolean).sort((a, b) => parseFloat(a) - parseFloat(b)), [baseList]);
 
-  const computedStoreList = useMemo(() => {
-    if (storeList && storeList.length > 0) return storeList;
-    // 回退：从设备数据推导（有id时）
-    const map = new Map<string, string>();
-    baseList.forEach(e => {
-      if (e.storeId) map.set(String(e.storeId), e.storeName || String(e.storeId));
-    });
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [storeList, baseList]);
-
-  const storeOptions = useMemo(() => computedStoreList.map(s => ({ label: s.name, value: s.id })), [computedStoreList]);
-
-  // 性能优化：对搜索输入使用延迟值，降低筛选频率
-  const deferredSearch = useDeferredValue(search);
 
   const candidates = useMemo(() => {
     let list = baseList;
-    if (onlyWaiting) list = list.filter(e => e.rentalStatus === 'waiting');
-    if (filterBrand) list = list.filter(e => e.brand === filterBrand);
-    if (filterModel) list = list.filter(e => e.model === filterModel);
-    if (filterStoreIds && filterStoreIds.length > 0) {
-      const set = new Set(filterStoreIds.map(String));
-      list = list.filter(e => e.storeId && set.has(String(e.storeId)));
-    }
-    if (filterWarehouses && filterWarehouses.length > 0) {
-      const set = new Set(filterWarehouses);
-      list = list.filter(e => e.warehouse && set.has(e.warehouse));
-    }
-    if (deferredSearch) {
-      const s = deferredSearch.trim();
-      list = list.filter((e) => (e.code || '').includes(s) || (e.customCode || '').includes(s));
-    }
-    // 退场：若提供允许选择的编码集合，则仅保留该集合
+    // 修复：若提供了 allowedCodes（退场/报停/索赔场景），优先使用它过滤，且不应用 onlyWaiting 过滤
     if (allowedCodes && allowedCodes.length > 0) {
       const set = new Set(allowedCodes);
       list = list.filter(e => set.has(e.code));
+    } else {
+      // 进场场景：应用 onlyWaiting 过滤和固定的门店过滤
+      // 修复：待租状态包括 'available' 和 'waiting' 两个值
+      if (onlyWaiting) list = list.filter(e => e.rentalStatus === 'available' || e.rentalStatus === 'waiting');
+      // 进场场景：根据 defaultStoreIds 固定筛选门店
+      if (defaultStoreIds && defaultStoreIds.length > 0) {
+        const set = new Set(defaultStoreIds.map(String));
+        list = list.filter(e => e.storeId && set.has(String(e.storeId)));
+      }
+    }
+    // 高度筛选（所有场景通用）
+    if (filterHeight) {
+      list = list.filter(e => String(e.height) === filterHeight);
     }
     return list;
-  }, [baseList, onlyWaiting, filterBrand, filterModel, filterStoreIds, filterWarehouses, deferredSearch, allowedCodes]);
+  }, [baseList, onlyWaiting, defaultStoreIds, filterHeight, allowedCodes]);
 
   const selectedEquipments = useMemo(() => {
     const list = Array.isArray(equipmentList) ? equipmentList : [];
@@ -123,7 +105,7 @@ const EquipmentPickerModal: React.FC<Props> = ({ open, item, equipmentList, init
   const removeSelected = (code: string) => {
     Modal.confirm({
       title: '确认移除该设备？',
-      content: `设备编码 ${code} 将从已选列表移除。`,
+      content: `出厂编号 ${code} 将从已选列表移除。`,
       okText: '移除',
       cancelText: '取消',
       okButtonProps: { danger: true },
@@ -153,29 +135,40 @@ const EquipmentPickerModal: React.FC<Props> = ({ open, item, equipmentList, init
   };
 
 
-  const columns: ColumnsType<any> = [
-    { title: '设备编码', dataIndex: 'code', key: 'code', width: 140 },
-    { title: '自编码', dataIndex: 'customCode', key: 'customCode', width: 140 },
-    { title: '品牌', dataIndex: 'brand', key: 'brand', width: 120 },
-    { title: '型号', dataIndex: 'model', key: 'model', width: 150 },
-    { title: '所属门店', dataIndex: 'storeName', key: 'storeName', width: 140, render: (v: string) => v || '—' },
-    { title: '来源', dataIndex: 'source', key: 'source', width: 100, render: (v: string) => renderEquipmentSource(v) },
-    { title: '仓库', dataIndex: 'warehouse', key: 'warehouse', width: 120 },
-    { title: '高度', dataIndex: 'height', key: 'height', width: 100 },
-    {
-      title: '状态',
-      dataIndex: 'rentalStatus',
-      key: 'rentalStatus',
-      width: 100,
-      render: (v: string) => {
-        const { text, color } = mapRentalStatus(v);
-        return <Tag color={color}>{text}</Tag>;
+  // 根据场景选择显示的列：退场/报停/索赔场景只显示编码和自编码
+  const columns: ColumnsType<any> = useMemo(() => {
+    if (allowedCodes && allowedCodes.length > 0) {
+      // 退场/报停/索赔场景：仅显示出厂编号和自编码
+      return [
+        { title: '出厂编号', dataIndex: 'code', key: 'code', width: 200 },
+        { title: '自编码', dataIndex: 'customCode', key: 'customCode', width: 200 },
+        { title: '高度', dataIndex: 'height', key: 'height', width: 120 },
+      ];
+    }
+    // 进场等场景：显示完整信息
+    return [
+      { title: '出厂编号', dataIndex: 'code', key: 'code', width: 140 },
+      { title: '自编码', dataIndex: 'customCode', key: 'customCode', width: 140 },
+      { title: '品牌', dataIndex: 'brand', key: 'brand', width: 120 },
+      { title: '型号', dataIndex: 'model', key: 'model', width: 150 },
+      { title: '所属门店', dataIndex: 'storeName', key: 'storeName', width: 140, render: (v: string) => v || '—' },
+      { title: '来源', dataIndex: 'source', key: 'source', width: 100, render: (v: string) => renderEquipmentSource(v) },
+      { title: '仓库', dataIndex: 'warehouse', key: 'warehouse', width: 120 },
+      { title: '高度', dataIndex: 'height', key: 'height', width: 100 },
+      {
+        title: '状态',
+        dataIndex: 'rentalStatus',
+        key: 'rentalStatus',
+        width: 100,
+        render: (v: string) => {
+          const { text, color } = mapRentalStatus(v);
+          return <Tag color={color}>{text}</Tag>;
+        },
       },
-    },
-  ];
+    ];
+  }, [allowedCodes]);
 
-  const storeNameMap = useMemo(() => new Map(computedStoreList.map(s => [String(s.id), s.name])), [computedStoreList]);
-  const data = candidates.map((e) => ({ key: e.code, ...e, storeName: e.storeName || (e.storeId ? storeNameMap.get(String(e.storeId)) : undefined) }));
+  const data = candidates.map((e) => ({ key: e.code, ...e }));
   const progressPercent = requiredCount > 0 ? Math.min(100, Math.round((selectedCodes.length / requiredCount) * 100)) : 0;
 
   return (
@@ -195,57 +188,44 @@ const EquipmentPickerModal: React.FC<Props> = ({ open, item, equipmentList, init
       <Row gutter={16}>
         <Col span={16}>
           <div style={{ marginBottom: 8, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <Input.Search
-              allowClear
-              placeholder="搜索编码/自编码"
-              onSearch={setSearch}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{ width: 240 }}
-            />
-            <Select
-              allowClear
-              placeholder="品牌"
-              style={{ width: 140 }}
-              value={filterBrand}
-              onChange={setFilterBrand}
-              options={brandOptions.map(b => ({ label: b, value: b }))}
-            />
-            <Select
-              allowClear
-              placeholder="型号"
-              style={{ width: 160 }}
-              value={filterModel}
-              onChange={setFilterModel}
-              options={modelOptions.map(m => ({ label: m, value: m }))}
-            />
-            <Select
-              mode="multiple"
-              allowClear
-              placeholder="出库门店（可多选）"
-              style={{ width: 220 }}
-              value={filterStoreIds}
-              onChange={(vals) => setFilterStoreIds(vals as string[])}
-              options={storeOptions}
-            />
-            <Select
-              mode="multiple"
-              allowClear
-              placeholder="设备所在仓库（可多选）"
-              style={{ width: 220 }}
-              value={filterWarehouses}
-              onChange={(vals) => setFilterWarehouses(vals as string[])}
-              options={warehouseOptions.map(w => ({ label: w, value: w }))}
-            />
-            <Checkbox 
-              checked={onlyWaiting} 
-              onChange={(e) => setOnlyWaiting(e.target.checked)}
-              disabled={forceWaitingOnly} // 在调拨场景下禁用此选项
-            >
-              仅显示待租
-            </Checkbox>
-            <Typography.Text type="secondary">
-              建议选 {requiredCount} 台，可超额；已选 {selectedCodes.length} 台
-            </Typography.Text>
+            {/* 退场/报停/索赔场景：只显示高度筛选 */}
+            {allowedCodes && allowedCodes.length > 0 ? (
+              <>
+                <Select
+                  allowClear
+                  placeholder="按高度筛选"
+                  style={{ width: 180 }}
+                  value={filterHeight}
+                  onChange={setFilterHeight}
+                  options={heightOptions.map(h => ({ label: `${h}米`, value: h }))}
+                />
+                <Typography.Text type="secondary">
+                  共 {candidates.length} 台设备，已选 {selectedCodes.length} 台
+                </Typography.Text>
+              </>
+            ) : (
+              /* 进场等其他场景：只显示高度筛选和待租复选框 */
+              <>
+                <Select
+                  allowClear
+                  placeholder="按高度筛选"
+                  style={{ width: 180 }}
+                  value={filterHeight}
+                  onChange={setFilterHeight}
+                  options={heightOptions.map(h => ({ label: `${h}米`, value: h }))}
+                />
+                <Checkbox 
+                  checked={onlyWaiting} 
+                  onChange={(e) => setOnlyWaiting(e.target.checked)}
+                  disabled={forceWaitingOnly}
+                >
+                  仅显示待租
+                </Checkbox>
+                <Typography.Text type="secondary">
+                  已选 {selectedCodes.length} 台 / 建议 {requiredCount} 台
+                </Typography.Text>
+              </>
+            )}
           </div>
           <Table
             size="small"

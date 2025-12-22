@@ -12,12 +12,16 @@ import templatesReducer from '../features/templates/templatesSlice'
 import billingsReducer from '../features/billings/billingsSlice'
 import companiesReducer from '../features/companies/companiesSlice'
 import usersReducer from '../features/users/usersSlice'
-import accessoriesReducer from '../features/accessories/accessoriesSlice'
+import partsReducer from '../features/parts/partsSlice'
 import repairsReducer from '../features/repairs/repairsSlice'
 import financeReducer from '../features/finance/financeSlice'
 import policiesReducer from '../features/policies/policiesSlice'
 import employeesReducer from '../features/employees/employeesSlice'
 import subleaseReducer from '../features/sublease/subleaseSlice'
+import remindersReducer from '../features/reminders/remindersSlice'
+import dashboardReducer from '../features/dashboard/dashboardSlice'
+import purchasesReducer from '../features/purchases/purchasesSlice'
+import workflowsReducer from '../features/workflows/workflowsSlice'
 
 // 创建store配置
 export const store = configureStore({
@@ -32,12 +36,16 @@ export const store = configureStore({
     billings: billingsReducer,
     companies: companiesReducer,
     users: usersReducer,
-    accessories: accessoriesReducer,
+    parts: partsReducer,
     repairs: repairsReducer,
     finance: financeReducer,
     policies: policiesReducer,
     employees: employeesReducer,
     sublease: subleaseReducer,
+    reminders: remindersReducer,
+    dashboard: dashboardReducer,
+    purchases: purchasesReducer,
+    workflows: workflowsReducer,
     app: (state = {}) => state,
     auth: authReducer
   },

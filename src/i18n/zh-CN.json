@@ -12,7 +12,7 @@
   "errors.driver_not_found": "司机不存在",
   "errors.order_not_found": "订单不存在",
   "errors.model_exists": "设备型号已存在",
-  "errors.equipment_code_exists": "设备编码已存在",
+  "errors.equipment_code_exists": "出厂编号已存在",
   "errors.name_address_required": "名称/地址为必填项",
   "errors.plate_spec_required": "车牌号/规格为必填项",
   "errors.name_phone_required": "姓名/电话为必填项",

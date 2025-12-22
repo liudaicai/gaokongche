@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Card, Button, Table, Modal, Form, Input, Select, Space, Tag, message, Popconfirm, Upload, Segmented, Row, Col, Statistic, Tooltip, Divider, Typography } from 'antd';
+import { Card, Button, Table, Modal, Form, Input, Select, Space, Tag, App, Popconfirm, Upload, Segmented, Row, Col, Statistic, Tooltip, Divider, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   AppstoreOutlined,
@@ -40,6 +40,7 @@ const { Title } = Typography;
 
 const TemplateManagement: React.FC = () => {
   const dispatch = useDispatch<AppDispatch>();
+  const { message } = App.useApp();
   const templates = useSelector((state: RootState) => selectTemplates(state));
   const loading = useSelector((state: RootState) => state.templates.loading);
 
@@ -274,22 +275,22 @@ const TemplateManagement: React.FC = () => {
 
         <Row gutter={16}>
           <Col span={6}>
-            <Card bordered={false} hoverable>
+            <Card variant="borderless" hoverable>
               <Statistic title="总模板数" value={stats.total} prefix={<FileTextOutlined />} />
             </Card>
           </Col>
           <Col span={6}>
-            <Card bordered={false} hoverable>
+            <Card variant="borderless" hoverable>
               <Statistic title="启用中" value={stats.enabled} valueStyle={{ color: '#3f8600' }} prefix={<CheckCircleOutlined />} />
             </Card>
           </Col>
           <Col span={6}>
-            <Card bordered={false} hoverable>
+            <Card variant="borderless" hoverable>
               <Statistic title="覆盖单据类型" value={stats.types} suffix="/ 6" prefix={<GlobalOutlined />} />
             </Card>
           </Col>
           <Col span={6}>
-            <Card bordered={false} hoverable onClick={openAdd} style={{ cursor: 'pointer', borderColor: '#1677ff', borderStyle: 'dashed' }}>
+            <Card variant="borderless" hoverable onClick={openAdd} style={{ cursor: 'pointer', borderColor: '#1677ff', borderStyle: 'dashed' }}>
               <Statistic title="快速操作" value="新增模板" prefix={<PlusOutlined />} valueStyle={{ fontSize: 18, color: '#1677ff' }} />
             </Card>
           </Col>
@@ -297,7 +298,7 @@ const TemplateManagement: React.FC = () => {
       </div>
 
       <Card
-        bordered={false}
+        variant="borderless"
         title={
           <Segmented
             options={[

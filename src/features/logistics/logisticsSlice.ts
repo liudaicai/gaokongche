@@ -1,5 +1,6 @@
-import { createSlice, PayloadAction, createAction } from '@reduxjs/toolkit';
+import { createSlice, PayloadAction, createAction, createAsyncThunk } from '@reduxjs/toolkit';
 import type { RootState } from '../../app/store';
+import { apiPost } from '../../api/client';
 
 // 附件接口
 export interface Attachment {
@@ -54,23 +55,46 @@ export interface LogisticsCompany {
 // 物流类型
 export type LogisticsType = 'own' | 'third';
 
-// 订单类型
-export type OrderType = 'inbound' | 'outbound' | 'transfer';
+// 记录类型（进场/退场/仓库调拨）
+export type RecordType = 'entry' | 'exit' | 'warehouse_transfer';
 
 // 物流台账项接口
 export interface LogisticsLedgerItem {
   id: string;
+  ledgerNumber?: string;
+  orderId?: number;
   orderNumber: string;
+  customerName?: string;
+  projectName?: string;
+  entryId?: number;
+  exitId?: number;
   logisticsType: LogisticsType;
-  orderType: OrderType;
+  recordType: RecordType;
   storeId: string;
   storeName: string;
+  sourceStoreId?: string;
+  sourceStoreName?: string;
+  targetStoreId?: string;
+  targetStoreName?: string;
   amount: number;
+  logisticsCost?: number;
   date: string;
+  recordDate?: string;
   remark?: string;
+  vehicleId?: string;
+  vehiclePlate?: string;
+  driverId?: string;
+  driverName?: string;
+  driverPhone?: string;
+  companyId?: string;
+  companyName?: string;
+  companyContactName?: string;
+  companyContactPhone?: string;
   vehicleInfo?: string;
   driverInfo?: string;
   companyInfo?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 // 状态接口
@@ -88,6 +112,32 @@ export interface LogisticsState {
 export const fetchLedgerDataStart = createAction('logistics/fetchLedgerDataStart');
 export const fetchLedgerDataSuccess = createAction<LogisticsLedgerItem[]>('logistics/fetchLedgerDataSuccess');
 export const fetchLedgerDataFailure = createAction<string>('logistics/fetchLedgerDataFailure');
+
+// 创建物流台账记录（异步thunk）
+export const addLedgerItem = createAsyncThunk(
+  'logistics/addLedgerItem',
+  async (item: LogisticsLedgerItem, { rejectWithValue }) => {
+    try {
+      const response = await apiPost<{ ok: boolean; id: string; ledgerNumber: string }>(
+        '/logistics/ledger',
+        item
+      );
+      
+      if (!response.ok) {
+        return rejectWithValue('创建台账记录失败');
+      }
+      
+      // 返回创建的记录（带上服务器生成的ID和编号）
+      return {
+        ...item,
+        id: response.id,
+        ledgerNumber: response.ledgerNumber
+      };
+    } catch (err: any) {
+      return rejectWithValue(err?.message || '创建台账记录失败');
+    }
+  }
+);
 
 // 初始状态（改为完全由后端数据驱动，不使用本地模拟数据）
 const initialState: LogisticsState = {
@@ -295,9 +345,18 @@ export const logisticsSlice = createSlice({
       state.loading = false;
       state.error = action.payload;
     },
-    // 添加台账记录
-    addLedgerItem(state, action: PayloadAction<LogisticsLedgerItem>) {
+    // 添加台账记录（同步到Redux和数据库）
+    addLedgerItemStart(state) {
+      state.loading = true;
+      state.error = null;
+    },
+    addLedgerItemSuccess(state, action: PayloadAction<LogisticsLedgerItem>) {
+      state.loading = false;
       state.ledgerData.push(action.payload);
+    },
+    addLedgerItemFailure(state, action: PayloadAction<string>) {
+      state.loading = false;
+      state.error = action.payload;
     }
   },
   extraReducers: (builder) => {
@@ -313,6 +372,19 @@ export const logisticsSlice = createSlice({
       .addCase(fetchLedgerDataFailure, (state, action: PayloadAction<string>) => {
         state.loading = false;
         state.error = action.payload;
+      })
+      // addLedgerItem thunk
+      .addCase(addLedgerItem.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(addLedgerItem.fulfilled, (state, action) => {
+        state.loading = false;
+        state.ledgerData.push(action.payload);
+      })
+      .addCase(addLedgerItem.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string || '创建台账记录失败';
       });
   }
 });
@@ -357,8 +429,7 @@ export const {
   deleteCompanyFailure,
   fetchStoresStart,
   fetchStoresSuccess,
-  fetchStoresFailure,
-  addLedgerItem
+  fetchStoresFailure
 } = logisticsSlice.actions;
 
 // 选择器

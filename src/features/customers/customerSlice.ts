@@ -223,7 +223,8 @@ const mapDtoToCustomer = (dto: CustomerDTO): Customer => {
 export const fetchCustomers = () => async (dispatch: any) => {
   dispatch(fetchCustomersStart());
   try {
-    const list = await apiGet<CustomerDTO[]>('/customers');
+    const response = await apiGet<{ data: CustomerDTO[]; pagination?: any }>('/customers?page=1&pageSize=1000');
+    const list = Array.isArray(response) ? response : (response.data || []);
     dispatch(fetchCustomersSuccess(list.map(mapDtoToCustomer)));
   } catch (err: any) {
     dispatch(fetchCustomersFailure(err?.message || '获取客户列表失败'));
@@ -260,14 +261,13 @@ export const addCustomer = (customer: Customer) => async (dispatch: any) => {
       receivedAmount: (customer as any).receivedAmount ?? 0,
     };
     const resp = await apiPost<{ id: number }>('/customers', payload);
-    const created: Customer = {
-      ...customer,
-      id: String(resp.id),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    } as Customer;
-    dispatch(addCustomerSuccess(created));
-    return created;
+    
+    // 创建成功后，重新获取该客户的数据以确保数据完整性
+    const createdCustomer = await apiGet<CustomerDTO>(`/customers/${resp.id}`);
+    const mappedCustomer = mapDtoToCustomer(createdCustomer);
+    
+    dispatch(addCustomerSuccess(mappedCustomer));
+    return mappedCustomer;
   } catch (err: any) {
     dispatch(addCustomerFailure(err?.message || '添加客户失败'));
   }
@@ -303,7 +303,12 @@ export const updateCustomer = (customer: Customer) => async (dispatch: any) => {
       receivedAmount: (customer as any).receivedAmount ?? 0,
     };
     await apiPut(`/customers/${id}`, payload);
-    dispatch(updateCustomerSuccess(customer));
+    
+    // 更新成功后，重新获取该客户的数据以确保数据完整性
+    const updatedCustomer = await apiGet<CustomerDTO>(`/customers/${id}`);
+    const mappedCustomer = mapDtoToCustomer(updatedCustomer);
+    
+    dispatch(updateCustomerSuccess(mappedCustomer));
   } catch (err: any) {
     dispatch(updateCustomerFailure(err?.message || '更新客户失败'));
   }

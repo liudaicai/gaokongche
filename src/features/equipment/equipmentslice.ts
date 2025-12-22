@@ -4,7 +4,7 @@ import type { RootState } from '../../app/store';
 // 设备类型定义
 export interface Equipment {
   id: string;
-  code: string; // 设备编码
+  code: string; // 出厂编号
   customCode: string; // 自编码
   type: string; // 类型
   height: number; // 高度
@@ -13,14 +13,24 @@ export interface Equipment {
   source: 'sublease' | 'self-owned'; // 设备来源：转租、自有
   rentalStatus: 'renting' | 'waiting' | 'repairing'; // 租赁状态：在租、待租、维修
   contractName?: string; // 合同名称
-  insuranceStatus: 'insured' | 'uninsured'; // 保险状态：在保、脱保
+  orderId?: string; // 关联的订单ID（当设备在租时）
+  customerName?: string; // 客户名称（当设备在租时，从订单获取）
+  projectName?: string; // 项目名称（当设备在租时，从订单获取）
+  contractNumber?: string; // 合同编号（当设备在租时，从订单获取）
+  insuranceStatus: 'insured' | 'uninsured' | 'expiring'; // 保险状态：在保、脱保、即将到期
   warehouse: string; // 所在仓库
+  // 保单信息
+  policyNumber?: string; // 保单号
+  policyCompany?: string; // 投保公司
+  policyEndDate?: string; // 保单到期日
+  daysToExpire?: number; // 剩余天数
   // 新增字段（可选），用于更完整的设备信息
   category?: string; // 设备类别（如 高空车、叉车、吊车）
   storeId?: string; // 所属门店ID
   storeName?: string; // 所属门店名称
   purchaseDate?: string; // 采购日期（YYYY-MM-DD）
   factoryDate?: string; // 出厂日期（YYYY-MM-DD）
+  purchasePrice?: number; // 采购价格（元），用于资产利用率计算
   attachments?: Array<{id: string; name: string; url: string; size?: number; type?: string}>; // 附件
   createdAt: string;
   updatedAt: string;
@@ -105,91 +115,10 @@ export interface EquipmentState {
 
 // 初始状态
 const initialState: EquipmentState = {
-  equipmentList: [
-    {
-      id: '1',
-      code: 'EQ2024001',
-      customCode: 'GC-001',
-      type: '剪刀车',
-      height: 12,
-      model: 'JCPT1210HD',
-      brand: '徐工',
-      source: 'self-owned',
-      rentalStatus: 'renting',
-      contractName: '2024年度高空车租赁合同',
-      insuranceStatus: 'insured',
-      warehouse: '上海仓库',
-      attachments: [],
-      createdAt: '2024-01-15T08:30:00Z',
-      updatedAt: '2024-03-10T14:20:00Z'
-    },
-    {
-      id: '2',
-      code: 'EQ2024002',
-      customCode: 'GC-002',
-      type: '直臂车',
-      height: 20,
-      model: 'ZTC200',
-      brand: '三一',
-      source: 'sublease',
-      rentalStatus: 'waiting',
-      insuranceStatus: 'insured',
-      warehouse: '北京仓库',
-      attachments: [],
-      createdAt: '2024-02-01T10:15:00Z',
-      updatedAt: '2024-02-01T10:15:00Z'
-    },
-    {
-      id: '3',
-      code: 'EQ2024003',
-      customCode: 'GC-003',
-      type: '曲臂车',
-      height: 16,
-      model: 'GTBZ16A',
-      brand: '中联重科',
-      source: 'self-owned',
-      rentalStatus: 'repairing',
-      insuranceStatus: 'uninsured',
-      warehouse: '广州仓库',
-      attachments: [],
-      createdAt: '2024-01-10T09:45:00Z',
-      updatedAt: '2024-03-15T09:45:00Z'
-    }
-  ],
+  equipmentList: [],
   inventoryList: [],
   transferOrders: [],
-  accessories: [
-    {
-      id: '1',
-      materialNumber: 'AC2024001',
-      modelSpec: 'HB-123',
-      totalQuantity: 100,
-      usedQuantity: 30,
-      availableQuantity: 70,
-      name: '液压油',
-      applicableScope: '各类型高空车',
-      warehouse: '上海仓库',
-      category: '油品',
-      area: '华东区',
-      createdAt: '2024-01-20T10:00:00Z',
-      updatedAt: '2024-03-05T16:30:00Z'
-    },
-    {
-      id: '2',
-      materialNumber: 'AC2024002',
-      modelSpec: 'TR-456',
-      totalQuantity: 50,
-      usedQuantity: 15,
-      availableQuantity: 35,
-      name: '轮胎',
-      applicableScope: '剪刀车系列',
-      warehouse: '北京仓库',
-      category: '橡胶件',
-      area: '华北区',
-      createdAt: '2024-02-05T14:20:00Z',
-      updatedAt: '2024-02-20T11:10:00Z'
-    }
-  ],
+  accessories: [],
   accessoryTransactions: [],
   loading: false,
   error: null

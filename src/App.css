@@ -22,16 +22,19 @@
   -webkit-appearance: none;
   margin: 0;
 }
+
 .no-spin {
   -moz-appearance: textfield;
   appearance: textfield;
 }
+
 /* Ensure Ant Design InputNumber also hides spin buttons when wrapper has no-spin */
 .no-spin input[type="number"]::-webkit-outer-spin-button,
 .no-spin input[type="number"]::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
+
 .no-spin input[type="number"] {
   -moz-appearance: textfield;
   appearance: textfield;

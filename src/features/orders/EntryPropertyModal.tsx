@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Modal, Form, Input, Select, Row, Col, Divider, Typography, message, Upload, Button, Tag } from 'antd';
-import { UploadOutlined } from '@ant-design/icons';
+import { PlusOutlined } from '@ant-design/icons';
 import { useSelector, useDispatch } from 'react-redux';
 import type { AppDispatch, RootState } from '../../app/store';
 import { Order } from './types';
@@ -154,10 +154,12 @@ const [pickerState, setPickerState] = useState<{ open: boolean; index: number; i
         attachmentsMap[code] = files.map((f: any) => ({ uid: f.uid, name: f.name, type: f.type, size: f.size }));
       });
 
+      // ⚠️ 关键修复：明确保留 equipmentItems，避免后端清空设备需求
       const updated: any = {
         ...order,
         rentedEquipmentIds: mergedRented,
-        entryAttachments: { ...(order?.entryAttachments || {}), ...attachmentsMap }
+        entryAttachments: { ...(order?.entryAttachments || {}), ...attachmentsMap },
+        equipmentItems: order.equipmentItems // 保留原有的设备需求
       };
       await dispatch(updateOrder(updated)).unwrap();
 
@@ -168,7 +170,7 @@ const [pickerState, setPickerState] = useState<{ open: boolean; index: number; i
     }
   };
 
-  // 使用设备模块实际数据：按类型/高度筛选“待租”设备，展示设备编码/自编码
+  // 使用设备模块实际数据：按类型/高度筛选"待租"设备，展示出厂编号/自编号
 
   const renderLogisticsFields = () => {
     const logisticsType: LogisticsUIType = form.getFieldValue('logisticsType');
@@ -377,7 +379,7 @@ const [pickerState, setPickerState] = useState<{ open: boolean; index: number; i
                         {selected.map(code => (
                           <Row gutter={8} key={code}>
                             <Col span={24}>
-                              <Form.Item label={`设备编码 ${code} 的进场附件`}>
+                              <Form.Item label={`出厂编号 ${code} 的进场附件`}>
                                 <Upload
                                   fileList={entryAttachmentMap[code] || []}
                                   beforeUpload={() => false}
@@ -396,7 +398,7 @@ const [pickerState, setPickerState] = useState<{ open: boolean; index: number; i
                                     });
                                   })}
                                 >
-                                  <Button icon={<UploadOutlined />}>上传附件</Button>
+                                  <Button icon={<PlusOutlined />}>上传附件</Button>
                                 </Upload>
                               </Form.Item>
                             </Col>

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Drawer, Form, Input, Select, Upload, Button, Space, Card, message, Spin, notification, Empty, Row, Col, Divider, Typography, Avatar, Alert, Modal, App } from 'antd';
+import { Drawer, Form, Input, Select, Upload, Button, Space, Card, Spin, notification, Empty, Row, Col, Divider, Typography, Avatar, Alert, Modal, App } from 'antd';
 import { UploadOutlined, MinusCircleOutlined, PlusCircleOutlined, UserOutlined, ShopOutlined, PhoneOutlined, IdcardOutlined, HomeOutlined, UserSwitchOutlined, CreditCardOutlined, FileAddOutlined, EnvironmentOutlined, FileTextOutlined, PlusOutlined, ScanOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
 import { API_BASE, getAuthHeaders } from '../../api/client';
@@ -176,7 +176,7 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
     beforeUpload(file) {
       const isLessThan2M = file.size / 1024 / 1024 < 2;
       if (!isLessThan2M) {
-        message.error('文件大小不能超过2MB!');
+        messageApi.error('文件大小不能超过2MB!');
         return Upload.LIST_IGNORE;
       }
       return true;
@@ -188,9 +188,9 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
         if (url) {
           (info.file as any).url = url;
         }
-        message.success(`${info.file.name} 上传成功`);
+        messageApi.success(`${info.file.name} 上传成功`);
       } else if (status === 'error') {
-        message.error(`${info.file.name} 上传失败`);
+        messageApi.error(`${info.file.name} 上传失败`);
       }
     },
   };
@@ -217,8 +217,12 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
     
     try {
       const result = await recognizeIDCard(file, handleProgress);
+      console.log('handleIDCardOCR 收到结果:', result);
+      
       if (result) {
         setOcrResult(result);
+        console.log('准备显示确认对话框');
+        
         // 显示确认对话框
         modal.confirm({
           title: '识别成功',
@@ -229,21 +233,46 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
               <div style={{ marginTop: 12, padding: 12, background: '#f5f5f5', borderRadius: 4 }}>
                 {result.name && <div><strong>姓名：</strong>{result.name}</div>}
                 {result.idNumber && <div><strong>身份证号：</strong>{result.idNumber}</div>}
+                {result.gender && <div><strong>性别：</strong>{result.gender}</div>}
+                {result.birth && <div><strong>出生日期：</strong>{result.birth}</div>}
                 {result.address && <div><strong>地址：</strong>{result.address}</div>}
               </div>
             </div>
           ),
           onOk: () => {
+            // 填充表单
             form.setFieldsValue({
               name: result.name || '',
               idCardNumber: result.idNumber || '',
             });
-            messageApi.success('已自动填充表单');
+            
+            // 将身份证图片添加到附件
+            const currentAttachments = form.getFieldValue('attachments') || [];
+            const fileObj: any = {
+              uid: `id-card-${Date.now()}`,
+              name: `身份证-${result.name || '未命名'}.${file.name.split('.').pop()}`,
+              status: 'done',
+              originFileObj: file,
+              thumbUrl: URL.createObjectURL(file), // 创建预览URL
+            };
+            
+            form.setFieldsValue({
+              attachments: [...currentAttachments, fileObj]
+            });
+            
+            messageApi.success('已自动填充表单并添加身份证附件');
+          },
+          onCancel: () => {
+            console.log('用户取消自动填充');
           },
         });
+      } else {
+        console.warn('OCR返回结果为空');
+        messageApi.warning('识别结果为空，请重试或手动输入');
       }
     } catch (error) {
       console.error('OCR识别失败:', error);
+      messageApi.error('身份证识别失败，请手动输入');
     } finally {
       setOcrProcessing(false);
     }
@@ -283,12 +312,28 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
             </div>
           ),
           onOk: () => {
+            // 填充表单
             form.setFieldsValue({
               companyName: result.companyName || '',
               creditCode: result.creditCode || '',
               address: result.address || '',
             });
-            messageApi.success('已自动填充表单');
+            
+            // 将营业执照图片添加到附件
+            const currentAttachments = form.getFieldValue('attachments') || [];
+            const fileObj: any = {
+              uid: `business-license-${Date.now()}`,
+              name: `营业执照-${result.companyName || '未命名'}.${file.name.split('.').pop()}`,
+              status: 'done',
+              originFileObj: file,
+              thumbUrl: URL.createObjectURL(file), // 创建预览URL
+            };
+            
+            form.setFieldsValue({
+              attachments: [...currentAttachments, fileObj]
+            });
+            
+            messageApi.success('已自动填充表单并添加营业执照附件');
           },
         });
       }
@@ -363,7 +408,7 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
       }
 
       onSuccess(customerData);
-      message.success(customer ? '客户更新成功' : '客户添加成功');
+      messageApi.success(customer ? '客户更新成功' : '客户添加成功');
     } catch (error: any) {
       console.error('表单验证失败:', error);
     } finally {

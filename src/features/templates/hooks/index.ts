@@ -1,0 +1,3 @@
+export { useTemplateRender } from './useTemplateRender';
+
+

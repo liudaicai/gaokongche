@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Form, Input, DatePicker, Upload, Button, Row, Col, Divider, Typography, message, Modal } from 'antd';
-import { UploadOutlined } from '@ant-design/icons';
+import { PlusOutlined } from '@ant-design/icons';
 import { useDispatch } from 'react-redux';
 import type { AppDispatch } from '../../../app/store';
 import { Order, ClearanceRecord } from '../types';
 import { addClearance } from '../ordersSlice';
 import { useTabs } from '../../common/TabsContext';
+import { FixedFooterButtons } from '../../../components/FixedFooterButtons';
 
 const { Text } = Typography;
 
@@ -78,13 +79,9 @@ const ClearanceOperationTab: React.FC<Props> = ({ order, tabKey }) => {
   };
 
   return (
-    <div style={{ padding: 16 }}>
+    <div style={{ padding: 16 }} className="page-with-fixed-footer">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Typography.Title level={4} style={{ margin: 0 }}>结清</Typography.Title>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Button onClick={() => closeTab(tabKey)}>返回</Button>
-          <Button type="primary" onClick={handleSave}>保存</Button>
-        </div>
       </div>
       <Form form={form} layout="vertical">
         {(() => {
@@ -146,13 +143,18 @@ const ClearanceOperationTab: React.FC<Props> = ({ order, tabKey }) => {
                 });
               })}
             >
-              <Button icon={<UploadOutlined />}>上传附件</Button>
+              <Button icon={<PlusOutlined />}>上传附件</Button>
             </Upload>
           </Form.Item>
             </React.Fragment>
           );
         })()}
       </Form>
+      
+      <FixedFooterButtons>
+        <Button onClick={() => closeTab(tabKey)}>返回</Button>
+        <Button type="primary" onClick={handleSave}>保存</Button>
+      </FixedFooterButtons>
     </div>
   );
 };

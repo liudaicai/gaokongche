@@ -5,11 +5,7 @@ import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { AppDispatch, RootState } from '../../app/store';
 import {
-  addVehicleSuccess,
-  updateVehicleSuccess,
   deleteVehicleSuccess,
-  addDriverSuccess,
-  updateDriverSuccess,
   deleteDriverSuccess,
   deleteCompanySuccess,
   Vehicle,
@@ -29,7 +25,7 @@ import {
   fetchStoresFailure
 } from './logisticsSlice';
 import { Store } from '../stores/types';
-import { apiGet, apiDelete } from '../../api/client';
+import { apiGet, apiDelete, apiPost, apiPut } from '../../api/client';
 
 
 const LogisticsManagement: React.FC = () => {
@@ -63,7 +59,11 @@ const LogisticsManagement: React.FC = () => {
       dispatch(fetchVehiclesStart());
       try {
         const apiVehicles = await apiGet<Vehicle[]>('/logistics/vehicles');
-        dispatch(fetchVehiclesSuccess(apiVehicles));
+        const normalized = (apiVehicles || []).map((v: any) => ({
+          ...v,
+          stores: Array.isArray(v?.stores) ? v.stores : [],
+        }));
+        dispatch(fetchVehiclesSuccess(normalized as Vehicle[]));
       } catch (err: any) {
         dispatch(fetchVehiclesFailure(err?.message || '获取车辆列表失败'));
         message.error(err?.message || '获取车辆列表失败');
@@ -75,7 +75,11 @@ const LogisticsManagement: React.FC = () => {
       dispatch(fetchDriversStart());
       try {
         const apiDrivers = await apiGet<Driver[]>('/logistics/drivers');
-        dispatch(fetchDriversSuccess(apiDrivers));
+        const normalized = (apiDrivers || []).map((d: any) => ({
+          ...d,
+          stores: Array.isArray(d?.stores) ? d.stores : [],
+        }));
+        dispatch(fetchDriversSuccess(normalized as Driver[]));
       } catch (err: any) {
         dispatch(fetchDriversFailure(err?.message || '获取司机列表失败'));
         message.error(err?.message || '获取司机列表失败');
@@ -87,7 +91,11 @@ const LogisticsManagement: React.FC = () => {
       dispatch(fetchCompaniesStart());
       try {
         const apiCompanies = await apiGet<LogisticsCompany[]>('/logistics/companies');
-        dispatch(fetchCompaniesSuccess(apiCompanies));
+        const normalized = (apiCompanies || []).map((c: any) => ({
+          ...c,
+          stores: Array.isArray(c?.stores) ? c.stores : [],
+        }));
+        dispatch(fetchCompaniesSuccess(normalized as LogisticsCompany[]));
       } catch (err: any) {
         dispatch(fetchCompaniesFailure(err?.message || '获取物流公司列表失败'));
         message.error(err?.message || '获取物流公司列表失败');
@@ -98,7 +106,8 @@ const LogisticsManagement: React.FC = () => {
     const fetchStores = async () => {
       dispatch(fetchStoresStart());
       try {
-        const apiStores = await apiGet<any[]>('/stores');
+        const response = await apiGet<{ data: any[] } | any[]>('/stores');
+        const apiStores = Array.isArray(response) ? response : (response.data || []);
         const mapped: Store[] = apiStores.map((s: any) => ({ 
           id: s.id, 
           name: s.name,
@@ -145,7 +154,7 @@ const LogisticsManagement: React.FC = () => {
       title: '服务门店',
       dataIndex: 'stores',
       key: 'stores',
-      render: (stores: Store[]) => stores.map(store => store.name).join(', ')
+      render: (stores) => Array.isArray(stores) ? stores.map((store: Store) => store.name).join(', ') : '-'
     },
     {
       title: '备注',
@@ -189,7 +198,7 @@ const LogisticsManagement: React.FC = () => {
       title: '服务门店',
       dataIndex: 'stores',
       key: 'stores',
-      render: (stores: Store[]) => stores.map(store => store.name).join(', ')
+      render: (stores) => Array.isArray(stores) ? stores.map((store: Store) => store.name).join(', ') : '-'
     },
     {
       title: '备注',
@@ -228,7 +237,7 @@ const LogisticsManagement: React.FC = () => {
       title: '服务门店',
       dataIndex: 'stores',
       key: 'stores',
-      render: (stores: Store[]) => stores.map(store => store.name).join(', ')
+      render: (stores) => Array.isArray(stores) ? stores.map((store: Store) => store.name).join(', ') : '-'
     },
     {
       title: '联系人',
@@ -293,30 +302,31 @@ const LogisticsManagement: React.FC = () => {
   const handleSaveVehicle = async () => {
     try {
       const values = await vehicleForm.validateFields();
+      const payload = {
+        plateNumber: values.plateNumber,
+        spec: values.spec,
+        remark: values.remark,
+        storeIds: Array.isArray(values.stores) ? values.stores : []
+      };
       if (currentVehicle) {
-        const updatedVehicle: Vehicle = {
-          ...currentVehicle,
-          plateNumber: values.plateNumber,
-          spec: values.spec,
-          stores: stores.filter(s => values.stores.includes(s.id)),
-          remark: values.remark,
-          updatedAt: new Date().toISOString()
-        };
-        dispatch(updateVehicleSuccess(updatedVehicle));
+        await apiPut(`/logistics/vehicles/${currentVehicle.id}`, payload);
         message.success('车辆信息更新成功');
       } else {
-        const newVehicle: Vehicle = {
-          id: `V${vehicles.length + 1}`.padEnd(4, '0'),
-          plateNumber: values.plateNumber,
-          spec: values.spec,
-          stores: stores.filter(s => values.stores.includes(s.id)),
-          remark: values.remark,
-          attachments: [],
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-        dispatch(addVehicleSuccess(newVehicle));
+        await apiPost('/logistics/vehicles', payload);
         message.success('车辆添加成功');
+      }
+      // 保存后刷新列表
+      try {
+        dispatch(fetchVehiclesStart());
+        const apiVehicles = await apiGet<Vehicle[]>('/logistics/vehicles');
+        const normalized = (apiVehicles || []).map((v: any) => ({
+          ...v,
+          stores: Array.isArray(v?.stores) ? v.stores : [],
+        }));
+        dispatch(fetchVehiclesSuccess(normalized as Vehicle[]));
+      } catch (err: any) {
+        dispatch(fetchVehiclesFailure(err?.message || '获取车辆列表失败'));
+        message.error(err?.message || '获取车辆列表失败');
       }
       setIsVehicleModalVisible(false);
     } catch (errorInfo) {
@@ -356,30 +366,31 @@ const LogisticsManagement: React.FC = () => {
   const handleSaveDriver = async () => {
     try {
       const values = await driverForm.validateFields();
+      const payload = {
+        name: values.name,
+        phone: values.phone,
+        remark: values.remark,
+        storeIds: Array.isArray(values.stores) ? values.stores : []
+      };
       if (currentDriver) {
-        const updatedDriver: Driver = {
-          ...currentDriver,
-          name: values.name,
-          phone: values.phone,
-          stores: stores.filter(s => values.stores.includes(s.id)),
-          remark: values.remark,
-          updatedAt: new Date().toISOString()
-        };
-        dispatch(updateDriverSuccess(updatedDriver));
+        await apiPut(`/logistics/drivers/${currentDriver.id}`, payload);
         message.success('司机信息更新成功');
       } else {
-        const newDriver: Driver = {
-          id: `D${drivers.length + 1}`.padEnd(4, '0'),
-          name: values.name,
-          phone: values.phone,
-          stores: stores.filter(s => values.stores.includes(s.id)),
-          remark: values.remark,
-          attachments: [],
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-        dispatch(addDriverSuccess(newDriver));
+        await apiPost('/logistics/drivers', payload);
         message.success('司机添加成功');
+      }
+      // 保存后刷新列表
+      try {
+        dispatch(fetchDriversStart());
+        const apiDrivers = await apiGet<Driver[]>('/logistics/drivers');
+        const normalized = (apiDrivers || []).map((d: any) => ({
+          ...d,
+          stores: Array.isArray(d?.stores) ? d.stores : [],
+        }));
+        dispatch(fetchDriversSuccess(normalized as Driver[]));
+      } catch (err: any) {
+        dispatch(fetchDriversFailure(err?.message || '获取司机列表失败'));
+        message.error(err?.message || '获取司机列表失败');
       }
       setIsDriverModalVisible(false);
     } catch (errorInfo) {
@@ -402,10 +413,35 @@ const LogisticsManagement: React.FC = () => {
   // 保存物流公司
   const handleSaveCompany = async () => {
     try {
-      await companyForm.validateFields();
-      // 这里应该有保存逻辑，暂时只关闭模态框
+      const values = await companyForm.validateFields();
+      const payload = {
+        name: values.name,
+        contactPerson: values.contactPerson,
+        contactPhone: values.contactPhone,
+        pricingRule: values.pricingRule,
+        storeIds: Array.isArray(values.stores) ? values.stores : []
+      };
+      if (currentCompany) {
+        await apiPut(`/logistics/companies/${currentCompany.id}`, payload);
+        message.success('物流公司信息更新成功');
+      } else {
+        await apiPost('/logistics/companies', payload);
+        message.success('物流公司添加成功');
+      }
+      // 保存后刷新列表
+      try {
+        dispatch(fetchCompaniesStart());
+        const apiCompanies = await apiGet<LogisticsCompany[]>('/logistics/companies');
+        const normalized = (apiCompanies || []).map((c: any) => ({
+          ...c,
+          stores: Array.isArray(c?.stores) ? c.stores : [],
+        }));
+        dispatch(fetchCompaniesSuccess(normalized as LogisticsCompany[]));
+      } catch (err: any) {
+        dispatch(fetchCompaniesFailure(err?.message || '获取物流公司列表失败'));
+        message.error(err?.message || '获取物流公司列表失败');
+      }
       setIsCompanyModalVisible(false);
-      message.success('物流公司保存成功');
     } catch (error) {
       console.error('保存失败:', error);
     }

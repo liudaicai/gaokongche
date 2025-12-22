@@ -3,7 +3,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { Button, Table, Modal, Popconfirm, message, Space, Tag } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import type { RootState, AppDispatch } from '../../app/store';
-import { 
+import {
   fetchCustomers,
   deleteCustomer,
   addCustomer,
@@ -26,7 +26,7 @@ const CustomerList: React.FC = () => {
   useEffect(() => {
     dispatch(fetchCustomers() as any);
   }, [dispatch]);
-  
+
 
 
   // 打开添加客户模态框
@@ -63,6 +63,17 @@ const CustomerList: React.FC = () => {
   // 表格列配置
   const columns = [
     {
+      title: '客户类型',
+      dataIndex: 'type',
+      key: 'type',
+      render: (type: string) => (
+        <Tag color={type === 'personal' ? 'blue' : 'green'}>
+          {type === 'personal' ? '个人客户' : '企业客户'}
+        </Tag>
+      ),
+      width: 100,
+    },
+    {
       title: '客户名称/联系人/电话',
       dataIndex: 'name',
       key: 'name',
@@ -78,10 +89,10 @@ const CustomerList: React.FC = () => {
           );
         } else {
           const enterpriseRecord = record as any; // 类型断言
-          const contact = enterpriseRecord.contacts && enterpriseRecord.contacts.length > 0 
-            ? enterpriseRecord.contacts[0] 
+          const contact = enterpriseRecord.contacts && enterpriseRecord.contacts.length > 0
+            ? enterpriseRecord.contacts[0]
             : null;
-          
+
           return (
             <div>
               <div>{enterpriseRecord.companyName}</div>
@@ -96,9 +107,13 @@ const CustomerList: React.FC = () => {
       }
     },
     {
-      title: '负责人',
-      dataIndex: 'businessManager',
-      key: 'businessManager'
+      title: '业务负责人',
+      dataIndex: 'businessManagerName',
+      key: 'businessManager',
+      render: (_: string, record: Customer) => {
+        // 优先显示 businessManagerName，如果没有则显示 businessManager
+        return (record as any).businessManagerName || (record as any).businessManager || '-';
+      }
     },
     {
       title: '在租设备数量',
@@ -133,9 +148,9 @@ const CustomerList: React.FC = () => {
       key: 'action',
       render: (_: any, record: Customer) => (
         <Space size="middle">
-          <Button 
-            type="text" 
-            icon={<EditOutlined />} 
+          <Button
+            type="text"
+            icon={<EditOutlined />}
             onClick={() => showEditModal(record)}
           >
             编辑
@@ -157,9 +172,9 @@ const CustomerList: React.FC = () => {
 
   // 渲染表头右侧的添加按钮
   const tableHeader = (
-    <Button 
-      type="primary" 
-      icon={<PlusOutlined />} 
+    <Button
+      type="primary"
+      icon={<PlusOutlined />}
       onClick={showAddModal}
     >
       添加客户
@@ -182,7 +197,7 @@ const CustomerList: React.FC = () => {
           showTotal: (total) => `共 ${total} 条数据`
         }}
       />
-      
+
       {/* 添加/编辑客户模态框，使用错误边界包装 */}
       <ErrorBoundary fallback={
         <Modal

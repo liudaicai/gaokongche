@@ -1,0 +1,133 @@
+{
+  "说明": "此文件包含完整的测试数据，用于测试Word模板",
+  "使用方法": "将此数据复制到 API 调用的 body 中",
+  
+  "测试数据": {
+    "orderNumber": "ORD20240116001",
+    "orderStatus": "进行中",
+    "projectName": "深圳湾超级总部基地建设项目",
+    "projectAddress": "广东省深圳市南山区后海大道与滨海大道交汇处",
+    "startDate": "2024-01-15",
+    "endDate": "2024-04-15",
+    "totalDays": 90,
+    "totalAmount": 108000,
+    "deposit": 30000,
+    "paidAmount": 50000,
+    "remainingAmount": 58000,
+    "remarks": "1. 设备需在早上8点前送达工地\n2. 夜间施工需提前通知安全员\n3. 雨天停工",
+    
+    "customerName": "深圳市建筑工程有限公司",
+    "customerType": "企业",
+    "customerContactPerson": "张三",
+    "customerPhone": "13800138000",
+    "customerAddress": "广东省深圳市福田区福华路88号中心商务大厦20楼",
+    "customerIdCard": "440300199001011234",
+    "customerEmail": "zhangsan@example.com",
+    
+    "equipments": [
+      {
+        "index": 1,
+        "code": "EQ2024001",
+        "customCode": "A-001",
+        "model": "吉尼曲臂车16米",
+        "brand": "吉尼（Genie）",
+        "category": "高空作业车",
+        "height": "16米",
+        "dailyRate": 1200,
+        "monthlyRate": 30000,
+        "quantity": 2
+      },
+      {
+        "index": 2,
+        "code": "EQ2024002",
+        "customCode": "A-002",
+        "model": "JLG直臂车20米",
+        "brand": "捷尔杰（JLG）",
+        "category": "高空作业车",
+        "height": "20米",
+        "dailyRate": 1500,
+        "monthlyRate": 38000,
+        "quantity": 1
+      },
+      {
+        "index": 3,
+        "code": "EQ2024003",
+        "customCode": "B-001",
+        "model": "剪叉式升降平台12米",
+        "brand": "星邦（SINOBOOM）",
+        "category": "升降平台",
+        "height": "12米",
+        "dailyRate": 800,
+        "monthlyRate": 20000,
+        "quantity": 3
+      }
+    ],
+    
+    "entryDate": "2024-01-15",
+    "entryAddress": "深圳市南山区后海大道工地现场",
+    "entryContact": "李四（现场负责人）",
+    "entryPhone": "13900139000",
+    "exitDate": "2024-04-15",
+    "exitAddress": "深圳市南山区后海大道工地现场",
+    
+    "driverName": "王五",
+    "driverPhone": "13700137000",
+    "vehiclePlate": "粤B12345",
+    "logisticsCost": 5000,
+    
+    "createdAt": "2024-01-10",
+    "createdBy": "admin",
+    "currentDate": "2024-12-16",
+    "currentYear": 2024,
+    "currentMonth": 12,
+    
+    "companyName": "深圳市XX高空车租赁有限公司",
+    "companyAddress": "广东省深圳市宝安区XX工业园A栋",
+    "companyPhone": "0755-12345678",
+    "companyLicense": "91440300MA5DXXXX1X",
+    
+    "paymentMethod": "银行转账",
+    "bankName": "中国银行深圳分行",
+    "bankAccount": "6217XXXXXXXXXXXX1234",
+    
+    "rentFee": 100000,
+    "transportFee": 5000,
+    "serviceFee": 3000
+  },
+  
+  "API调用示例": {
+    "url": "POST http://localhost:3001/api/word-templates/generate",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer YOUR_TOKEN"
+    },
+    "body": {
+      "templateName": "租赁合同",
+      "data": "（使用上面的测试数据）",
+      "filename": "测试合同.docx"
+    }
+  },
+  
+  "最小测试数据": {
+    "说明": "如果只想快速测试，使用这个最小数据集",
+    "orderNumber": "TEST001",
+    "customerName": "测试客户",
+    "projectName": "测试项目",
+    "totalAmount": 50000,
+    "deposit": 10000,
+    "startDate": "2024-01-01",
+    "endDate": "2024-03-31",
+    "createdAt": "2024-12-16",
+    "equipments": [
+      {
+        "index": 1,
+        "code": "TEST-EQ001",
+        "model": "测试设备",
+        "brand": "测试品牌",
+        "category": "高空车",
+        "height": "16米",
+        "dailyRate": 1000
+      }
+    ]
+  }
+}

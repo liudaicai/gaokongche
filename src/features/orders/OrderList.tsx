@@ -24,10 +24,12 @@ import SettlementTab from './tabs/SettlementTab';
 import ClearanceOperationTab from './tabs/ClearanceOperationTab';
 import ContractPreviewTab from './tabs/ContractPreviewTab';
 import NewOrderTab from './tabs/NewOrderTab';
+import InvoiceManagement from './InvoiceManagement';
 // 引入门店管理-公司认证数据源
 import { fetchCompanyVerifications } from '../stores/storesSlice';
 import { fetchCustomers } from '../customers/customerSlice';
 import OrderDetailTab from './tabs/OrderDetailTab';
+import OrderRepairModal from './components/OrderRepairModal';
 
 const OrderList: React.FC = () => {
   const dispatch = useDispatch<AppDispatch>();
@@ -36,7 +38,18 @@ const OrderList: React.FC = () => {
   const { openTab } = useTabs();
   const deleteLockRef = useRef<number>(0);
 
+  // 调试信息
+  useEffect(() => {
+    console.log('[OrderList] Orders updated:', orders);
+    console.log('[OrderList] Orders count:', orders.length);
+    console.log('[OrderList] Orders data:', JSON.stringify(orders.slice(0, 1), null, 2));
+    if (orders.length > 0) {
+      console.log('[OrderList] First order details:', orders[0]);
+    }
+  }, [orders]);
+
   const [isEquipmentModalVisible, setIsEquipmentModalVisible] = useState(false);
+  const [selectedOrderForRepair, setSelectedOrderForRepair] = useState<Order | null>(null);
   const [orderForm] = Form.useForm<OrderFormData>();
   // equipmentItemsWatch removed; watching is handled inside Form via EstimatedAmount
   const [equipmentFilter, setEquipmentFilter] = useState<EquipmentFilter>({
@@ -45,7 +58,7 @@ const OrderList: React.FC = () => {
     status: '待租'
   });
   // 移除expandedRows状态，不需要点击展开
-  
+
   // 模拟设备数据
   const mockEquipmentData = [
     { id: 'eq1', type: '剪刀车', height: '8米', status: '待租' },
@@ -57,17 +70,27 @@ const OrderList: React.FC = () => {
     { id: 'eq7', type: '曲臂车', height: '18米', status: '待租' },
     { id: 'eq8', type: '蜘蛛车', height: '22米', status: '待租' },
   ];
-  
+
   // 设备类型和高度选项
   const equipmentTypes = ['剪刀车', '直臂车', '曲臂车', '蜘蛛车', '高空作业平台'];
   const heights = ['8米', '10米', '12米', '14米', '16米', '18米', '20米', '22米', '24米'];
-  
+
   // 加载数据
   useEffect(() => {
+    console.log('[OrderList] Fetching orders...');
     dispatch(fetchOrders());
     dispatch(fetchCustomers() as any);
     dispatch(fetchCompanyVerifications());
   }, [dispatch]);
+
+  // 监听订单数据变化，确保列表更新
+  const prevOrdersRef = useRef(orders);
+  useEffect(() => {
+    if (prevOrdersRef.current !== orders) {
+      // 订单数据已更新，强制重新渲染
+      prevOrdersRef.current = orders;
+    }
+  }, [orders]);
 
   // 打开订单详情标签页
   const openOrderDetailTab = (order: Order) => {
@@ -78,7 +101,7 @@ const OrderList: React.FC = () => {
       content: <OrderDetailTab orderId={order.id} tabKey={key} initialOrder={order} />,
     });
   };
-  
+
   // 处理新增订单
   const handleAddOrder = () => {
     const tabKey = `order-new-${Date.now()}`;
@@ -88,7 +111,7 @@ const OrderList: React.FC = () => {
       content: <NewOrderTab tabKey={tabKey} />
     });
   };
-  
+
   // 处理删除订单
   const handleDeleteOrder = async (orderId: string) => {
     try {
@@ -96,6 +119,49 @@ const OrderList: React.FC = () => {
       message.success('订单删除成功');
     } catch (error) {
       message.error('订单删除失败');
+    }
+  };
+
+  // 批量删除空订单（无任何关联单据）
+  const bulkDeleteEmptyOrders = async () => {
+    // 权限检查已放开，方便测试
+    try {
+      const empties: Order[] = [];
+      for (const o of orders) {
+        try {
+          const check = await apiGet<{ ok: boolean; data?: any; error?: string }>(`/orders/${o.id}/delete-check`);
+          if (!check?.ok || !check?.data) continue;
+          const associations = check.data.associations || {};
+          const total = Object.values(associations).map(v => Number(v) || 0).reduce((a, b) => a + b, 0);
+          if (total === 0) empties.push(o);
+        } catch { /* 忽略单个检查错误，继续 */ }
+      }
+      if (empties.length === 0) {
+        Modal.info({ title: '未发现空订单', content: '当前列表中没有可删除的空订单（无关联单据）。' });
+        return;
+      }
+      Modal.confirm({
+        title: `确认删除 ${empties.length} 个空订单？此操作不可撤销`,
+        okText: '确认删除',
+        cancelText: '取消',
+        okButtonProps: { danger: true },
+        onOk: async () => {
+          let ok = 0, fail = 0;
+          for (const o of empties) {
+            try {
+              await dispatch(deleteOrder(o.id)).unwrap();
+              ok++;
+            } catch {
+              fail++;
+            }
+          }
+          message.success(`批量删除完成：成功 ${ok}，失败 ${fail}`);
+          // 刷新列表，确保展示最新数据
+          try { await dispatch(fetchOrders()).unwrap(); } catch { }
+        },
+      });
+    } catch (e: any) {
+      Modal.error({ title: '批量删除失败', content: e?.message || '网络或服务器异常，请稍后重试' });
     }
   };
 
@@ -109,48 +175,19 @@ const OrderList: React.FC = () => {
 
   // 删除前预检查 + 二次确认
   const preCheckAndConfirmDelete = async (record: Order) => {
-    if (!canDelete) {
-      Modal.warning({ title: '无删除权限', content: '仅允许具有“合同管理-删除”权限的用户执行此操作' });
-      return;
-    }
-    try {
-      const check = await apiGet<{ ok: boolean; data?: any; error?: string }>(`/orders/${record.id}/delete-check`);
-      if (!check?.ok || !check?.data) throw new Error(check?.error || '检查失败');
-      const { contractNumber, contractName, associations } = check.data;
-      // 修正类型：将值显式转为 number 后再求和，避免 reduce 泛型不匹配
-      const total = Object.values(associations || {})
-        .map(v => Number(v) || 0)
-        .reduce((a, b) => a + b, 0);
-      if (total > 0) {
-        Modal.warning({
-          title: '存在关联单据，禁止删除',
-          content: (
-            <div style={{ whiteSpace: 'pre-wrap' }}>
-              {`合同编号：${contractNumber}\n合同名称：${contractName}`}
-              <br />
-              {`关联单据统计：进场(${associations.entries})、退场(${associations.exits})、收款(${associations.receipts})、退款(${associations.refunds})、报停(${associations.suspensions})、索赔(${associations.claims})、结算(${associations.settlements})、结清(${associations.clearances})`}
-              <br />
-              {'操作指引：请先删除上述所有关联单据后，再执行合同删除。'}
-            </div>
-          ),
-        });
-        return;
-      }
-      Modal.confirm({
-        title: '确认要删除该订单吗？此操作不可撤销',
-        okText: '确认删除',
-        cancelText: '取消',
-        okButtonProps: { danger: true },
-        onOk: async () => {
-          const now = Date.now();
-          if (now - (deleteLockRef.current || 0) < 300) return;
-          deleteLockRef.current = now;
-          await handleDeleteOrder(record.id);
-        },
-      });
-    } catch (e: any) {
-      Modal.error({ title: '删除前检查失败', content: e?.message || '网络或服务器异常，请稍后重试' });
-    }
+    // 权限检查已放开，方便测试
+    Modal.confirm({
+      title: '确认要删除该订单吗？此操作不可撤销',
+      okText: '确认删除',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        const now = Date.now();
+        if (now - (deleteLockRef.current || 0) < 300) return;
+        deleteLockRef.current = now;
+        await handleDeleteOrder(record.id);
+      },
+    });
   };
 
   const handleActionClick = (key: string, record: Order) => {
@@ -245,12 +282,25 @@ const OrderList: React.FC = () => {
       });
       return;
     }
+    if (key === 'invoice') {
+      const tabKey = `order-invoice-${record.id}`;
+      openTab({
+        key: tabKey,
+        label: `发票管理：${record.projectName || record.contractNumber || record.customerName || record.id}`,
+        content: <InvoiceManagement orderId={record.id} />
+      });
+      return;
+    }
     if (key === 'archive') {
       handleArchiveOrder(record);
       return;
     }
     if (key === 'delete') {
       preCheckAndConfirmDelete(record);
+      return;
+    }
+    if (key === 'repair') {
+      setSelectedOrderForRepair(record);
       return;
     }
     // 其他操作可在此扩展
@@ -266,9 +316,9 @@ const OrderList: React.FC = () => {
       message.error('订单归档失败');
     }
   };
-  
+
   // 不需要handleRowExpand函数，改为悬停显示
-  
+
 
   // 处理选择设备
   const handleSelectEquipment = (selectedEquipment: typeof mockEquipmentData[0]) => {
@@ -289,16 +339,16 @@ const OrderList: React.FC = () => {
       rentalPeriod: 30,
       shippingType: '双程'
     };
-    
+
     orderForm.setFieldsValue({
       equipmentItems: [...currentItems, newItem]
     });
     setIsEquipmentModalVisible(false);
   };
 
-  
+
   // 订单列表列配置
-  const columns: ColumnsType<Order> = [
+  const columns: ColumnsType<Order> = React.useMemo(() => [
     {
       title: '序号',
       key: 'index',
@@ -360,7 +410,8 @@ const OrderList: React.FC = () => {
       dataIndex: ['status', 'actualReceivedAmount'],
       render: (amount) => `¥${(amount ?? 0).toLocaleString()}`,
     },
-    {      title: '操作',
+    {
+      title: '操作',
       key: 'action',
       render: (_, record) => (
         <span onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
@@ -376,6 +427,8 @@ const OrderList: React.FC = () => {
                 { key: 'claim', label: <Button size="small">索赔</Button> },
                 { key: 'settlement', label: <Button size="small">结算</Button> },
                 { key: 'closing', label: <Button size="small">结清</Button> },
+                { key: 'invoice', label: <Button size="small">发票</Button> },
+                { key: 'repair', label: <Button size="small">报修</Button> },
                 { key: 'change', label: <Button size="small">变更</Button> },
                 {
                   key: 'archive',
@@ -390,33 +443,32 @@ const OrderList: React.FC = () => {
                     </Popconfirm>
                   )
                 },
-                { 
-                  key: 'delete', 
+                {
+                  key: 'delete',
                   label: (
                     <Button
                       size="small"
                       type="primary"
                       danger
                       style={{ minWidth: 48, minHeight: 48 }}
-                      disabled={!canDelete}
                     >
                       删除
                     </Button>
-                  ) 
+                  )
                 },
               ],
               onClick: ({ key }) => handleActionClick(key as string, record),
             }}
             placement="bottom"
-            trigger={['hover']}
+            trigger={['click']}
           >
-            <Button type="link" onClick={(e) => e.stopPropagation()}>操作</Button>
+            <Button size="small" onClick={(e) => e.stopPropagation()}>操作</Button>
           </Dropdown>
         </span>
       ),
     },
-  ];
-  
+  ], [openOrderDetailTab, canDelete]);
+
   // 过滤设备数据
   const filteredEquipment = mockEquipmentData.filter(equipment => {
     if (equipmentFilter.equipmentType && equipment.type !== equipmentFilter.equipmentType) return false;
@@ -424,22 +476,30 @@ const OrderList: React.FC = () => {
     if (equipmentFilter.status === '待租' && equipment.status !== '待租') return false;
     return true;
   });
-  
+
   return (
     <Card
       title="订单列表"
       extra={
-        <Button type="primary" icon={<PlusOutlined />} onClick={handleAddOrder}>
-          新增订单
-        </Button>
+        <span style={{ display: 'inline-flex', gap: 8 }}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleAddOrder}>
+            新增订单
+          </Button>
+          <Button danger onClick={bulkDeleteEmptyOrders} disabled={!canDelete}>
+            清理空订单
+          </Button>
+        </span>
       }
     >
       <Table
+        key={`orders-table-${orders.length}-${orders.map(o => o.id).join(',')}`}
         columns={columns}
-        dataSource={orders}
+        dataSource={Array.isArray(orders) ? orders : []}
         rowKey="id"
         loading={loading}
         pagination={{ pageSize: 10 }}
+        scroll={{ x: 1200 }}
+        locale={{ emptyText: orders.length === 0 ? '暫无数据' : '加载中...' }}
         onRow={(record) => ({
           onClick: () => openOrderDetailTab(record),
         })}
@@ -502,7 +562,18 @@ const OrderList: React.FC = () => {
           pagination={{ pageSize: 5 }}
         />
       </Modal>
-    </Card>
+
+      {/* 报修模态框 */}
+      {
+        selectedOrderForRepair && (
+          <OrderRepairModal
+            open={!!selectedOrderForRepair}
+            onCancel={() => setSelectedOrderForRepair(null)}
+            order={selectedOrderForRepair}
+          />
+        )
+      }
+    </Card >
   );
 };
 

@@ -1,5 +1,6 @@
 // 设备相关的工具函数
 import { Tag } from 'antd';
+import { Link } from 'react-router-dom';
 import type { Equipment } from './equipmentslice';
 
 /**
@@ -33,9 +34,12 @@ export const renderEquipmentSource = (source: string) => {
  */
 export const mapRentalStatus = (status: string) => {
   const statusMap: Record<string, { text: string; color: string }> = {
+    'available': { text: '待租', color: 'green' },  // 标准状态值
     'renting': { text: '在租', color: 'red' },
+    'repairing': { text: '维修中', color: 'gray' },
+    'retired': { text: '已退役', color: 'black' },
+    // 兼容旧值
     'waiting': { text: '待租', color: 'green' },
-    'repairing': { text: '维修', color: 'gray' },
     'idle': { text: '闲置', color: 'orange' }
   };
   return statusMap[status] || { text: status, color: 'default' };
@@ -66,24 +70,78 @@ export const mapInsuranceStatus = (status: string) => {
 };
 
 /**
- * 渲染保险状态标签
+ * 渲染保险状态标签（带到期天数提醒）
  * @param status 保险状态值
+ * @param record 设备记录（可选，包含保单信息）
  * @returns React组件
  */
-export const renderInsuranceStatus = (status: string) => {
+export const renderInsuranceStatus = (status: string, record?: any) => {
   const { text, color } = mapInsuranceStatus(status);
+  
+  // 如果有到期天数信息，显示提醒
+  if (record && status === 'expiring' && record.daysToExpire !== undefined) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <Tag color={color}>{text}</Tag>
+        <span style={{ fontSize: '11px', color: '#ff4d4f' }}>
+          剩余 {record.daysToExpire} 天
+        </span>
+      </div>
+    );
+  }
+  
+  // 如果在保且有保单信息，显示保单号
+  if (record && status === 'insured' && record.policyNumber) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <Tag color={color}>{text}</Tag>
+        <span style={{ fontSize: '11px', color: '#999' }}>
+          {record.policyNumber}
+        </span>
+      </div>
+    );
+  }
+  
   return <Tag color={color}>{text}</Tag>;
 };
 
 /**
- * 渲染合同名称，仅在租赁状态为在租时显示
+ * 渲染合同名称，仅在租赁状态为在租时显示，并可点击跳转
+ * 优先显示：客户名/项目名
  * @param contractName 合同名称
  * @param record 设备记录
- * @returns 显示的文本
+ * @returns 显示的文本或链接
  */
 export const renderContractName = (contractName: string, record: Partial<Equipment>) => {
   if (record.rentalStatus === 'renting') {
-    return contractName || '未设置合同名称';
+    // 构建显示文本：优先显示客户名/项目名
+    let displayText = '';
+    if (record.customerName && record.projectName) {
+      displayText = `${record.customerName}/${record.projectName}`;
+    } else if (record.customerName) {
+      displayText = record.customerName;
+    } else if (record.projectName) {
+      displayText = record.projectName;
+    } else if (contractName) {
+      displayText = contractName;
+    } else {
+      displayText = '未设置';
+    }
+
+    // 如果有订单ID，显示为可点击链接
+    if (record.orderId) {
+      return (
+        <Link 
+          to={`/orders/${record.orderId}`}
+          style={{ color: '#1890ff', textDecoration: 'none' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {displayText}
+        </Link>
+      );
+    }
+    
+    return displayText;
   }
   return '-';
 };

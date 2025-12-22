@@ -1,0 +1,62 @@
+/* 固定底部按钮栏样式 */
+.fixed-footer-buttons {
+  position: fixed;
+  bottom: 0;
+  left: 200px;
+  /* 侧边栏宽度 */
+  right: 0;
+  height: 64px;
+  background: #fff;
+  border-top: 1px solid #f0f0f0;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.08);
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  transition: left 0.2s;
+}
+
+/* 侧边栏收起时的样式 */
+.ant-layout-sider-collapsed~.ant-layout .fixed-footer-buttons {
+  left: 80px;
+}
+
+.fixed-footer-buttons-content {
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.fixed-footer-buttons-left {
+  flex: 1;
+}
+
+.fixed-footer-buttons-right {
+  flex-shrink: 0;
+}
+
+/* 为页面内容添加底部padding，避免被固定按钮栏遮挡 */
+.page-with-fixed-footer {
+  padding-bottom: 80px !important;
+}
+
+/* 响应式：小屏幕时 */
+@media (max-width: 768px) {
+  .fixed-footer-buttons {
+    left: 0;
+    padding: 0 16px;
+  }
+
+  .fixed-footer-buttons-content {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .fixed-footer-buttons-left,
+  .fixed-footer-buttons-right {
+    width: 100%;
+  }
+}

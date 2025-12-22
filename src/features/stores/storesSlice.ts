@@ -14,8 +14,10 @@ const initialState: StoresState = {
 export const fetchStores = createAsyncThunk(
   'stores/fetchStores',
   async () => {
-    const list = await apiGet<Store[]>('/stores');
-    return list;
+    const response = await apiGet<{ data: Store[]; pagination?: any }>('/stores');
+    // 后端返回的是 { ok: true, data: [...], pagination: {...} } 格式
+    // 如果返回的是数组，直接使用；如果是对象，提取 data 字段
+    return Array.isArray(response) ? response : (response.data || []);
   }
 );
 
@@ -23,8 +25,15 @@ export const fetchStores = createAsyncThunk(
 export const fetchCompanyVerifications = createAsyncThunk(
   'stores/fetchCompanyVerifications',
   async () => {
-    const list = await apiGet<CompanyVerification[]>('/stores/company-verifications');
-    return Array.isArray(list) ? list : [];
+    try {
+      const response = await apiGet<CompanyVerification[] | { data: CompanyVerification[] }>('/stores/company-verifications');
+      // 后端返回 { ok: true, data: [...] }，但 apiGet 会自动提取 data
+      // 如果是数组，直接使用；如果是对象，提取 data 字段
+      return Array.isArray(response) ? response : (response.data || []);
+    } catch (error) {
+      console.error('[Stores] Fetch company verifications error:', error);
+      return [];
+    }
   }
 );
 

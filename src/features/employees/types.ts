@@ -1,34 +1,79 @@
-// 员工类型定义
+/**
+ * 员工管理类型定义
+ */
+
 export interface Employee {
   id: string;
-  username: string; // 登录账号
-  name: string; // 姓名
-  phone: string; // 手机号
-  idCardNumber: string; // 身份证号码
-  position: string; // 职务
-  region: string; // 所属区域
-  directLeader: string; // 直属领导
-  password?: string; // 密码（只在创建和修改时使用）
+  userId?: string;
+  username: string;
+  name: string;
+  phone: string;
+  email?: string;
+  idCardNumber?: string;
+  position?: string;
+  department?: string;
+  level?: 'intern' | 'staff' | 'senior' | 'manager' | 'director';
+  storeId?: string | null;
+  storeName?: string;
+  directLeaderId?: string | null;
+  directLeaderName?: string;
+  hireDate?: string;
+  emergencyContact?: string;
+  emergencyPhone?: string;
+  status?: 'active' | 'inactive' | 'resigned';
+  resignDate?: string;
+  notes?: string;
   createdAt: string;
   updatedAt: string;
 }
 
-// 新增员工表单数据
-export interface AddEmployeeFormData {
-  region: string;
+export interface CreateEmployeeData {
   username: string;
-  position: string;
-  directLeader: string;
   name: string;
   phone: string;
-  idCardNumber: string;
+  email?: string;
+  idCardNumber?: string;
+  position?: string;
+  department?: string;
+  level?: string;
+  storeId?: string;
+  directLeaderId?: string;
+  directLeaderName?: string;
   password: string;
-  confirmPassword: string;
+  confirmPassword?: string;
+  hireDate?: string;
+  emergencyContact?: string;
+  emergencyPhone?: string;
+  status?: string;
+  notes?: string;
 }
 
-// 员工状态类型
+export interface UpdateEmployeeData {
+  id: string;
+  name?: string;
+  phone?: string;
+  email?: string;
+  idCardNumber?: string;
+  position?: string;
+  department?: string;
+  level?: string;
+  storeId?: string;
+  directLeaderId?: string;
+  directLeaderName?: string;
+  hireDate?: string;
+  emergencyContact?: string;
+  emergencyPhone?: string;
+  status?: string;
+  resignDate?: string;
+  notes?: string;
+}
+
 export interface EmployeesState {
   employees: Employee[];
   loading: boolean;
   error: string | null;
+  total: number;
+  page: number;
+  pageSize: number;
 }
+

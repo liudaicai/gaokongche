@@ -1,0 +1,121 @@
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Word模板 - 变量速查表
+快速复制粘贴使用
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+【订单信息】
+{{orderNumber}}          订单编号
+{{projectName}}          项目名称
+{{projectAddress}}       项目地址
+{{startDate}}            开始日期
+{{endDate}}              结束日期
+{{totalAmount}}          总金额
+{{deposit}}              押金
+{{remarks}}              备注
+
+【客户信息】
+{{customerName}}              客户名称
+{{customerContactPerson}}     联系人
+{{customerPhone}}             电话
+{{customerAddress}}           地址
+{{customerIdCard}}            身份证号
+
+【设备列表 - 循环使用】
+{{#each equipments}}
+{{index}}. {{code}} - {{model}} - {{brand}}
+   类别：{{category}}  高度：{{height}}
+   日租金：{{dailyRate}}元/天
+{{/each}}
+
+【设备单个字段】
+{{index}}         序号
+{{code}}          设备编号
+{{customCode}}    自定义编号
+{{model}}         型号
+{{brand}}         品牌
+{{category}}      类别
+{{height}}        高度
+{{dailyRate}}     日租金
+{{monthlyRate}}   月租金
+
+【进场退场】
+{{entryDate}}     进场日期
+{{entryAddress}}  进场地址
+{{entryContact}}  进场联系人
+{{entryPhone}}    联系电话
+{{exitDate}}      退场日期
+
+【物流信息】
+{{driverName}}    司机
+{{driverPhone}}   司机电话
+{{vehiclePlate}}  车牌号
+{{logisticsCost}} 物流费用
+
+【系统信息】
+{{createdAt}}     创建日期
+{{createdBy}}     创建人
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+【常用模板片段】
+
+▼ 合同抬头
+合同编号：{{orderNumber}}
+签订日期：{{createdAt}}
+
+甲方：XXX公司
+乙方：{{customerName}}
+联系人：{{customerContactPerson}}
+电话：{{customerPhone}}
+
+▼ 项目信息
+项目名称：{{projectName}}
+项目地址：{{projectAddress}}
+租赁期限：{{startDate}} 至 {{endDate}}
+
+▼ 设备清单（简洁版）
+{{#each equipments}}
+{{index}}. {{code}} - {{model}} - {{brand}} - {{dailyRate}}元/天
+{{/each}}
+
+▼ 设备清单（详细版）
+{{#each equipments}}
+{{index}}. 设备信息
+   设备编号：{{code}}
+   设备型号：{{model}}
+   品牌名称：{{brand}}
+   设备类别：{{category}}
+   作业高度：{{height}}
+   日租金：{{dailyRate}} 元/天
+   月租金：{{monthlyRate}} 元/月
+   
+{{/each}}
+
+▼ 费用信息
+租金总额：{{totalAmount}} 元
+押金金额：{{deposit}} 元
+已付金额：{{paidAmount}} 元
+剩余金额：{{remainingAmount}} 元
+
+▼ 进场信息
+进场日期：{{entryDate}}
+进场地址：{{entryAddress}}
+联系人：{{entryContact}}
+电话：{{entryPhone}}
+
+▼ 签字栏
+甲方（盖章）：              乙方（签字）：
+
+签订日期：{{createdAt}}    签订日期：     年  月  日
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+【快速提示】
+
+1. 所有变量用 {{}} 包裹
+2. 金额字段自动添加千分位：50,000.00
+3. 循环必须配对：{{#each}}...{{/each}}
+4. 变量名区分大小写
+5. 空值会显示空白
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

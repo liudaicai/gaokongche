@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import dayjs from 'dayjs';
 import { useDispatch, useSelector } from 'react-redux';
-import { Button, Input, Select, Table, Space, Tag, Modal, Form, Upload, message, Card, Row, Col, Typography, Empty, Statistic, Dropdown, InputNumber, DatePicker, Divider } from 'antd';
-import { PlusOutlined, UploadOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, PaperClipOutlined, ShareAltOutlined, MoreOutlined, FileAddOutlined } from '@ant-design/icons';
+import { Button, Input, Select, Table, Space, Tag, Modal, Form, Upload, App, Card, Row, Col, Typography, Empty, Statistic, Dropdown, InputNumber, DatePicker, Divider } from 'antd';
+import { PlusOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, PaperClipOutlined, ShareAltOutlined, MoreOutlined, FileAddOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadFile, UploadProps } from 'antd/es/upload/interface';
 import type { AppDispatch } from '../../app/store';
 import { apiGet, apiPost, apiPut, apiDelete, API_BASE } from '../../api/client';
+import * as XLSX from 'xlsx';
 import { selectStores, fetchStores } from '../stores/storesSlice';
 import {
   fetchEquipmentsStart,
@@ -30,7 +31,6 @@ import {
   formatHeight
 } from './utils';
 
-const { Search } = Input;
 const { Option } = Select;
 
 const buildFileUrl = (u?: string) => {
@@ -58,10 +58,10 @@ const friendlyType = (type?: string, name?: string) => {
 };
 const formatBytes = (bytes?: number) => {
   if (bytes === undefined || bytes === null) return '未知大小';
-  const sizes = ['B','KB','MB','GB','TB'];
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   if (bytes === 0) return '0 B';
-  const i = Math.floor(Math.log(bytes)/Math.log(1024));
-  const val = bytes / Math.pow(1024,i);
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  const val = bytes / Math.pow(1024, i);
   return `${val.toFixed(val >= 100 ? 0 : val >= 10 ? 1 : 2)} ${sizes[i]}`;
 };
 const handleDownloadAttachment = (file: { url?: string; name?: string }) => {
@@ -93,16 +93,29 @@ interface EquipmentModel {
   driveType: string;
 }
 
+import EquipmentDetailDrawer from './components/EquipmentDetailDrawer';
+
 const EquipmentProfile: React.FC = () => {
   const dispatch = useDispatch<AppDispatch>();
+  const { message } = App.useApp();
+  const [detailDrawerVisible, setDetailDrawerVisible] = useState(false);
+  const [detailEquipment, setDetailEquipment] = useState<Equipment | null>(null);
+  
+  const showDetail = (record: Equipment) => {
+    setDetailEquipment(record);
+    setDetailDrawerVisible(true);
+  };
   const equipmentList = useSelector(selectEquipmentList);
   const loading = useSelector(selectLoading);
   const error = useSelector(selectError);
 
   const [searchParams, setSearchParams] = useState({
+    category: '',
+    type: '',
+    brand: '',
+    model: '',
     code: '',
     customCode: '',
-    type: '',
     height: ''
   });
   const [filteredList, setFilteredList] = useState<Equipment[]>([]);
@@ -112,9 +125,10 @@ const EquipmentProfile: React.FC = () => {
   const [form] = Form.useForm();
   const [isAttachmentModalVisible, setIsAttachmentModalVisible] = useState(false);
   const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null);
+  const [policyAttachments, setPolicyAttachments] = useState<any[]>([]);
   const [isBatchImportModalVisible, setIsBatchImportModalVisible] = useState(false);
   const [batchImportProgress, setBatchImportProgress] = useState(0);
-  const [batchImportResult, setBatchImportResult] = useState<{success: number, failed: number, failedItems: Array<{index: number, data: any, error: string}>} | null>(null);
+  const [batchImportResult, setBatchImportResult] = useState<{ success: number, failed: number, failedItems: Array<{ index: number, data: any, error: string }> } | null>(null);
   const [isImporting, setIsImporting] = useState(false);
 
   // 新增：门店、型号、附件状态与加载逻辑
@@ -125,27 +139,28 @@ const EquipmentProfile: React.FC = () => {
   const [selectedBrand, setSelectedBrand] = useState<string | undefined>(undefined);
   const [selectedType, setSelectedType] = useState<string | undefined>(undefined);
   const [selectedCategory, setSelectedCategory] = useState<string | undefined>(undefined);
-  
-  const brandOptions = useMemo(() => Array.from(new Set(models.map(m => m.brand))), [models]);
+
+  // 级联逻辑：类别 → 类型 → 品牌 → 型号
+  const categoryOptions = useMemo(() => Array.from(new Set(models.map(m => m.category))), [models]);
   const typeOptions = useMemo(() => {
     let list = models;
-    if (selectedBrand) list = list.filter(m => m.brand === selectedBrand);
+    if (selectedCategory) list = list.filter(m => m.category === selectedCategory);
     return Array.from(new Set(list.map(m => m.type)));
-  }, [models, selectedBrand]);
-  const categoryOptions = useMemo(() => {
+  }, [models, selectedCategory]);
+  const brandOptions = useMemo(() => {
     let list = models;
-    if (selectedBrand) list = list.filter(m => m.brand === selectedBrand);
+    if (selectedCategory) list = list.filter(m => m.category === selectedCategory);
     if (selectedType) list = list.filter(m => m.type === selectedType);
-    return Array.from(new Set(list.map(m => m.category)));
-  }, [models, selectedBrand, selectedType]);
+    return Array.from(new Set(list.map(m => m.brand)));
+  }, [models, selectedCategory, selectedType]);
   const visibleModels = useMemo(() => {
     let list = models;
-    if (selectedBrand) list = list.filter(m => m.brand === selectedBrand);
-    if (selectedType) list = list.filter(m => m.type === selectedType);
     if (selectedCategory) list = list.filter(m => m.category === selectedCategory);
+    if (selectedType) list = list.filter(m => m.type === selectedType);
+    if (selectedBrand) list = list.filter(m => m.brand === selectedBrand);
     return list;
-  }, [models, selectedBrand, selectedType, selectedCategory]);
-  
+  }, [models, selectedCategory, selectedType, selectedBrand]);
+
   // 保持打开时品牌与表单同步（编辑场景）
   useEffect(() => {
     if (isModalVisible) {
@@ -157,16 +172,37 @@ const EquipmentProfile: React.FC = () => {
       if (currentCategory) setSelectedCategory(currentCategory);
     }
   }, [isModalVisible]);
-  
+
+  // 修复：当models加载完成后，自动更新modelId（解决首次编辑时models为空的问题）
+  useEffect(() => {
+    if (isModalVisible && isEditing && currentEquipment && models.length > 0) {
+      const currentModelId = form.getFieldValue('modelId');
+      
+      // 如果modelId未设置，尝试重新查找并设置
+      if (!currentModelId && currentEquipment.model) {
+        const matchedModel = models.find(m => 
+          m.category === currentEquipment.category &&
+          m.brand === currentEquipment.brand &&
+          m.model === currentEquipment.model &&
+          parseFloat(m.height as any) === parseFloat(currentEquipment.height as any)
+        );
+        
+        if (matchedModel) {
+          form.setFieldsValue({ modelId: matchedModel.id });
+        }
+      }
+    }
+  }, [isModalVisible, isEditing, models, currentEquipment, form]);
+
   const loadModels = async () => {
     try {
       const data = await apiGet<EquipmentModel[]>('/models');
-      setModels(data);
+      setModels(data || []);
     } catch (err: any) {
       message.error(err?.message || '加载型号列表失败');
     }
   };
-  
+
   useEffect(() => {
     if (isModalVisible) {
       loadModels();
@@ -177,7 +213,7 @@ const EquipmentProfile: React.FC = () => {
     // 统一加载门店列表，避免使用初始模拟数据
     dispatch(fetchStores());
   }, [dispatch]);
-  
+
   const handleModelSelect = (modelId?: string | null) => {
     const m = modelId ? models.find(x => x.id === modelId) : undefined;
     if (m) {
@@ -187,6 +223,7 @@ const EquipmentProfile: React.FC = () => {
         type: m.type,
         height: m.height,
         category: m.category,
+        model: m.model,  // 添加型号名称字段
       });
       setSelectedBrand(m.brand);
       setSelectedType(m.type);
@@ -196,7 +233,7 @@ const EquipmentProfile: React.FC = () => {
       setModelLocked(false);
     }
   };
-  
+
   const onAttachmentChange: UploadProps['onChange'] = (info) => {
     const { status } = info.file || {};
     if (status === 'done') {
@@ -235,12 +272,15 @@ const EquipmentProfile: React.FC = () => {
     fetchEquipments();
   }, []);
 
-  // 过滤数据
+  // 过滤数据（按照：类别 → 类型 → 品牌 → 型号 的顺序）
   useEffect(() => {
-    const filtered = equipmentList.filter(equipment => 
+    const filtered = equipmentList.filter(equipment =>
+      (searchParams.category === '' || equipment.category === searchParams.category) &&
+      (searchParams.type === '' || equipment.type === searchParams.type) &&
+      (searchParams.brand === '' || equipment.brand === searchParams.brand) &&
+      (searchParams.model === '' || equipment.model?.includes(searchParams.model)) &&
       (searchParams.code === '' || equipment.code.includes(searchParams.code)) &&
       (searchParams.customCode === '' || equipment.customCode.includes(searchParams.customCode)) &&
-      (searchParams.type === '' || equipment.type === searchParams.type) &&
       (searchParams.height === '' || equipment.height.toString() === searchParams.height)
     );
     setFilteredList(filtered);
@@ -271,14 +311,37 @@ const EquipmentProfile: React.FC = () => {
     setSelectedType(undefined);
     setSelectedCategory(undefined);
     setModelLocked(false);
+    // 重置保存按钮状态
+    setSaveDisabled(false);
+    setIsSaving(false);
     setIsModalVisible(true);
   };
 
   const handleEditEquipment = (equipment: Equipment) => {
     setIsEditing(true);
     setCurrentEquipment(equipment);
+    
+    // 重置保存按钮状态
+    setSaveDisabled(false);
+    setIsSaving(false);
+    
+    // 根据设备的model查找对应的modelId
+    const matchedModel = models.find(m => 
+      m.category === equipment.category &&
+      m.brand === equipment.brand &&
+      m.model === equipment.model &&
+      parseFloat(m.height as any) === parseFloat(equipment.height as any)
+    );
+    
+    // 设置级联选择状态
+    setSelectedCategory(equipment.category);
+    setSelectedType(equipment.type);
+    setSelectedBrand(equipment.brand);
+    
     const normalized = {
       ...equipment,
+      modelId: matchedModel?.id, // 设置modelId以显示型号选择
+      storeId: equipment.storeId ? String(equipment.storeId) : undefined, // 确保storeId是字符串类型
       purchaseDate:
         equipment?.purchaseDate && dayjs(equipment.purchaseDate).isValid()
           ? dayjs(equipment.purchaseDate)
@@ -287,8 +350,24 @@ const EquipmentProfile: React.FC = () => {
         equipment?.factoryDate && dayjs(equipment.factoryDate).isValid()
           ? dayjs(equipment.factoryDate)
           : undefined,
+      // warehouse字段已经是仓库名称，保持不变
     };
+    
     form.setFieldsValue(normalized);
+    
+    // 处理附件
+    if (equipment.attachments && Array.isArray(equipment.attachments)) {
+      const files = equipment.attachments.map((att: any, idx: number) => ({
+        uid: att.id || `${idx}`,
+        name: att.name || '附件',
+        status: 'done',
+        url: att.url,
+        size: att.size,
+        type: att.type,
+      }));
+      setAttachmentFiles(files as any);
+    }
+    
     setIsModalVisible(true);
   };
 
@@ -326,22 +405,25 @@ const EquipmentProfile: React.FC = () => {
         };
       });
 
+      // 确保使用表单中的值，这些值已经通过handleModelSelect从型号库自动填充
       const basePayload = {
         code: values.code,
         customCode: values.customCode,
-        type: values.type,
-        height: Number(values.height),
-        model: selectedModel?.model || currentEquipment.model || '',
-        brand: values.brand,
+        // 使用表单值，确保与型号库一致
+        brand: values.brand,           // 品牌
+        type: values.type,             // 设备类型
+        category: values.category,     // 设备类别
+        height: Number(values.height), // 高度
+        model: selectedModel?.model || values.model || currentEquipment.model || '', // 型号
         source: values.source || 'self-owned',
         rentalStatus: values.rentalStatus || 'waiting',
         insuranceStatus: values.insuranceStatus || 'insured',
-        category: values.category,
         storeId: values.storeId,
         // 确保库存统计聚合使用的仓库字段在新增/更新时写入
         warehouse: store?.name || '',
         purchaseDate: purchaseDateStr,
         factoryDate: factoryDateStr,
+        purchasePrice: values.purchasePrice ? Number(values.purchasePrice) : 0, // 采购价格
         attachments,
       };
       const payload = basePayload;
@@ -351,13 +433,13 @@ const EquipmentProfile: React.FC = () => {
         const codeTrimmed = String(values.code || '').trim();
         const customCodeTrimmed = String(values.customCode || '').trim();
 
-        // 校验设备编码是否存在（仅当有值时）
+        // 校验出厂编号是否存在（仅当有值时）
         if (codeTrimmed) {
           const codeCheck = await apiGet<Equipment[]>(`/equipments?code=${encodeURIComponent(codeTrimmed)}`);
           const codeExists = Array.isArray(codeCheck) && codeCheck.some(e => String(e.code || '').trim() === codeTrimmed);
           if (codeExists) {
-            form.setFields([{ name: 'code', errors: [`设备编码[ ${codeTrimmed} ]已存在`] }]);
-            message.error(`设备编码[ ${codeTrimmed} ]已存在`);
+            form.setFields([{ name: 'code', errors: [`出厂编号[ ${codeTrimmed} ]已存在`] }]);
+            message.error(`出厂编号[ ${codeTrimmed} ]已存在`);
             setSaveDisabled(true);
             return;
           }
@@ -382,14 +464,29 @@ const EquipmentProfile: React.FC = () => {
       } else {
         setIsSaving(true);
         const r: any = await apiPost('/equipments', payload);
-        const newId = r?.id || `EQ${Date.now()}`;
-        dispatch(addEquipmentSuccess({
-          id: newId,
-          storeName: store?.name,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          ...payload,
-        } as Equipment));
+        // 使用后端返回的最新数据作为乐观更新，避免本地payload字段混淆
+        const newEquipment: Equipment = {
+          id: String(r?.id || `EQ${Date.now()}`),
+          code: r?.code || payload.code || '',
+          customCode: r?.customCode || payload.customCode || '',
+          model: r?.model || payload.model || '',
+          brand: r?.brand || payload.brand || '',
+          type: r?.type || payload.type || '',
+          category: r?.category || payload.category,
+          height: Number(r?.height ?? payload.height ?? 0),
+          source: (r?.source || payload.source || 'self-owned') as Equipment['source'],
+          rentalStatus: (r?.rentalStatus || payload.rentalStatus || 'waiting') as Equipment['rentalStatus'],
+          insuranceStatus: (r?.insuranceStatus || payload.insuranceStatus || 'insured') as Equipment['insuranceStatus'],
+          warehouse: r?.warehouse || payload.warehouse || '',
+          storeId: r?.storeId || payload.storeId,
+          storeName: r?.storeName || store?.name || '',
+          purchaseDate: r?.purchaseDate || payload.purchaseDate,
+          factoryDate: r?.factoryDate || payload.factoryDate,
+          attachments: Array.isArray(r?.attachments) ? r.attachments : (payload.attachments || []),
+          createdAt: r?.createdAt || new Date().toISOString(),
+          updatedAt: r?.updatedAt || new Date().toISOString(),
+        };
+        dispatch(addEquipmentSuccess(newEquipment));
         message.success('设备添加成功');
         setIsSaving(false);
       }
@@ -411,9 +508,29 @@ const EquipmentProfile: React.FC = () => {
     }
   };
 
-  const showAttachmentModal = (equipment: Equipment) => {
+  const showAttachmentModal = async (equipment: Equipment) => {
     setSelectedEquipment(equipment);
     setIsAttachmentModalVisible(true);
+
+    // 查询该设备关联的有效保单附件
+    try {
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch(`/api/equipments/${equipment.id}/policy-attachments`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setPolicyAttachments(result.data || result || []);
+      } else {
+        setPolicyAttachments([]);
+      }
+    } catch (error) {
+      console.error('获取保单附件失败:', error);
+      setPolicyAttachments([]);
+    }
   };
 
   const handleShareEquipment = (equipment: Equipment) => {
@@ -427,49 +544,205 @@ const EquipmentProfile: React.FC = () => {
     setBatchImportProgress(0);
     setBatchImportResult(null);
   };
-
-  const handleImportFile = async (_file: UploadFile) => {
+  const handleImportFile = async (file: File) => {
     setIsImporting(true);
     setBatchImportProgress(0);
     setBatchImportResult(null);
-    
-    try {
-      // 模拟文件处理和数据解析
-      // 实际应用中，这里应该使用FileReader读取文件内容并解析
-      const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-      
-      // 模拟进度更新
-      for (let i = 1; i <= 100; i++) {
-        await delay(20);
-        setBatchImportProgress(i);
+
+    const reader = new FileReader();
+
+    reader.onload = async (e) => {
+      try {
+        const data = e.target?.result;
+        // 使用 XLSX 读取数据（支持 Excel 和 CSV）
+        const workbook = XLSX.read(data, { type: 'binary' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+
+        // 转换为二维数组
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+
+        if (jsonData.length < 2) {
+          throw new Error('文件没有数据行');
+        }
+
+        const dataRows = jsonData.slice(1);
+        const total = dataRows.length;
+        if (total === 0) throw new Error('没有可导入的数据');
+
+        // 辅助函数：处理 Excel 日期
+        const formatDate = (val: any) => {
+          if (!val) return undefined;
+          if (typeof val === 'number') {
+            const date = XLSX.SSF.parse_date_code(val);
+            if (date) return `${date.y}-${String(date.m).padStart(2, '0')}-${String(date.d).padStart(2, '0')}`;
+          }
+          if (typeof val === 'string') {
+            const match = val.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+            if (match) return `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+          }
+          return undefined;
+        };
+
+        // 辅助函数：根据名称查找门店ID
+        const findStoreId = (name: string): string | undefined => {
+          if (!name || !stores) return undefined;
+          const store = stores.find(s => s.name === name || s.name.includes(name));
+          return store ? store.id : undefined;
+        };
+
+        let successCount = 0;
+        let failCount = 0;
+        const failedItems: any[] = [];
+
+        const defaultStoreId = stores && stores.length > 0 ? stores[0].id : undefined;
+
+        for (let i = 0; i < total; i++) {
+          const cols = dataRows[i];
+          if (!cols || cols.length === 0 || !cols[0]) continue;
+
+          // 解析列 - 注意列索引变化
+          // 0:出厂编号, 1:自编号, 2:所属区域/门店, 3:设备类别, 4:品牌, 5:型号, 6:设备类型, 7:高度, 8:来源, 9:采购日期, 10:出厂日期
+          const code = String(cols[0] || '').trim();
+          const customCode = cols[1] ? String(cols[1]).trim() : undefined;
+          const storeName = cols[2] ? String(cols[2]).trim() : undefined;
+          const category = cols[3] ? String(cols[3]).trim() : undefined;
+          const brand = cols[4] ? String(cols[4]).trim() : undefined;
+          const model = cols[5] ? String(cols[5]).trim() : undefined;
+          const type = cols[6] ? String(cols[6]).trim() : undefined;
+          const height = Number(cols[7] || 0);
+          const sourceStr = cols[8] ? String(cols[8]) : '';
+          const pDateRaw = cols[9];
+          const fDateRaw = cols[10];
+
+          // 匹配门店
+          let targetStoreId = defaultStoreId;
+          if (storeName) {
+            const foundId = findStoreId(storeName);
+            if (foundId) {
+              targetStoreId = foundId;
+            }
+          }
+
+          const payload: any = {
+            code,
+            customCode,
+            storeId: targetStoreId,
+            category,
+            brand,
+            model,
+            type,
+            height,
+            source: sourceStr.includes('转租') ? 'sublease' : 'self-owned',
+            rentalStatus: 'available',  // 修复：统一使用 'available' 表示待租
+            insuranceStatus: 'uninsured'
+          };
+
+          const pDate = formatDate(pDateRaw);
+          if (pDate) payload.purchaseDate = pDate;
+
+          const fDate = formatDate(fDateRaw);
+          if (fDate) payload.factoryDate = fDate;
+
+          if (!payload.code) {
+            failCount++;
+            failedItems.push({ index: i + 1, data: payload, error: '出厂编号为空' });
+            setBatchImportProgress(Math.floor(((i + 1) / total) * 100));
+            continue;
+          }
+
+          try {
+            await apiPost('/equipments', payload);
+            successCount++;
+          } catch (err: any) {
+            failCount++;
+            failedItems.push({ index: i + 1, data: payload, error: err.message || '创建失败' });
+          }
+
+          setBatchImportProgress(Math.floor(((i + 1) / total) * 100));
+        }
+
+        setBatchImportResult({ success: successCount, failed: failCount, failedItems });
+
+        if (successCount > 0 && failCount === 0) {
+          message.success(`✅ 成功导入 ${successCount} 台设备`);
+          fetchEquipments();
+          try {
+            dispatch(fetchInventoryStart());
+            const stats = await apiGet<any[]>('/equipments/inventory/stats');
+            dispatch(fetchInventorySuccess(stats));
+          } catch (e) { console.error(e); }
+        } else if (successCount > 0 && failCount > 0) {
+          message.warning(`⚠️ 部分导入成功：成功 ${successCount} 台，失败 ${failCount} 台，请查看详情`);
+          fetchEquipments();
+          try {
+            dispatch(fetchInventoryStart());
+            const stats = await apiGet<any[]>('/equipments/inventory/stats');
+            dispatch(fetchInventorySuccess(stats));
+          } catch (e) { console.error(e); }
+        } else {
+          message.error(`❌ 导入失败：所有 ${failCount} 条记录都未能导入，请查看详情`);
+        }
+
+      } catch (error: any) {
+        console.error('Import error:', error);
+        message.error(error.message || '文件解析失败');
+      } finally {
+        setIsImporting(false);
       }
-      
-      // 模拟导入结果
-      const success = Math.floor(Math.random() * 20) + 1;
-      const failed = Math.floor(Math.random() * 5);
-      const failedItems = Array.from({ length: failed }, (_, i) => ({
-        index: i + 1,
-        data: { code: `模拟设备${i + 1}`, type: '剪刀车' },
-        error: failed > 0 ? '部分字段验证失败' : ''
-      })).filter(item => item.error);
-      
-      setBatchImportResult({ success, failed, failedItems });
-      
-      // 如果有成功导入的设备，重新获取设备列表
-      if (success > 0) {
-        // 实际应用中，这里应该重新调用API获取最新数据
-        message.success(`成功导入 ${success} 台设备`);
-      }
-    } catch (error) {
-      message.error('文件解析失败，请检查文件格式');
-    } finally {
-      setIsImporting(false);
-    }
+    };
+
+    reader.onerror = () => { message.error('文件读取失败'); setIsImporting(false); };
+    reader.readAsBinaryString(file as any);
   };
 
   const downloadImportTemplate = () => {
-    // 实际应用中，这里应该提供一个真实的模板文件下载
-    message.info('模板下载功能待实现');
+    // 定义表头
+    const headers = [
+      '出厂编号(必填)',
+      '自编号',
+      '所属区域/门店', // New column
+      '设备类别',
+      '品牌',
+      '型号',
+      '设备类型',
+      '高度(米)',
+      '设备来源(自有/转租)',
+      '采购日期(YYYY-MM-DD)',
+      '出厂日期(YYYY-MM-DD)'
+    ];
+
+    const defaultStoreName = stores && stores.length > 0 ? stores[0].name : '默认门店';
+
+    // Updated sample data
+    const sampleData = [
+      ['EQ2023001', 'Z001', defaultStoreName, '高空车', '鼎力', 'JCPT1212DC', '剪叉车', '12', '自有', '2023-01-01', '2022-12-01'],
+      ['EQ2023002', 'Z002', defaultStoreName, '高空车', '徐工', 'XG1212DO', '剪叉车', '12', '转租', '2023-02-15', '2023-01-10']
+    ];
+
+    // 构建 CSV 内容
+    const bom = '\uFEFF';
+    const csvContent = bom + [
+      headers.join(','),
+      ...sampleData.map(row => row.join(','))
+    ].join('\n');
+
+    // 创建 Blob 对象
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+
+    // 创建下载链接
+    const link = document.createElement('a');
+    if (link.download !== undefined) {
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', '设备导入模板.csv');
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      message.success('模板下载成功');
+    }
   };
 
   const closeBatchImportModal = () => {
@@ -485,6 +758,9 @@ const EquipmentProfile: React.FC = () => {
     multiple: true,
     action: `${API_BASE}/upload`,
     accept: '.jpg,.jpeg,.png,.pdf',
+    headers: {
+      Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}`
+    },
     beforeUpload(file) {
       const allowedTypes = ['image/jpeg', 'image/png', 'application/pdf'];
       const typeOk = allowedTypes.includes(file.type) || /\.(jpg|jpeg|png|pdf)$/i.test(file.name);
@@ -499,26 +775,9 @@ const EquipmentProfile: React.FC = () => {
       }
       return true;
     },
-    headers: {
-      authorization: 'Bearer token',
-    },
-    onChange(info) {
-      const { status } = info.file;
-      if (status === 'done') {
-        const baseHost = API_BASE.replace(/\/api$/, '');
-        const resp: any = info.file?.response;
-        const relative = resp?.file?.url || resp?.url || resp?.data?.url || '';
-        if (relative) {
-          info.file.url = `${baseHost}${relative}`;
-        }
-        message.success(`${info.file.name} 文件上传成功`);
-      } else if (status === 'error') {
-        message.error(`${info.file.name} 文件上传失败`);
-      }
-    },
     onDrop(_e) {
-        // console.log('Dropped files', e.dataTransfer.files);
-      },
+      // console.log('Dropped files', e.dataTransfer.files);
+    },
   };
 
   // 上传配置 - 批量导入
@@ -541,36 +800,66 @@ const EquipmentProfile: React.FC = () => {
       width: 80,
     },
     {
-      title: '设备编码',
-      dataIndex: 'code',
-      key: 'code',
-      width: 150,
+      title: '出厂编号/自编号',
+      key: 'code-custom',
+      width: 180,
       fixed: 'left',
       ellipsis: true,
-      render: (text: string) => <Typography.Text strong>{text}</Typography.Text>
+      render: (_: any, record: Equipment) => (
+        <Space direction="vertical" size={0}>
+          <a onClick={() => showDetail(record)}>
+            <Typography.Text strong style={{ color: '#1677ff', cursor: 'pointer' }}>{record.code}</Typography.Text>
+          </a>
+          {record.customCode && (
+            <a onClick={() => showDetail(record)}>
+              <Typography.Text type="secondary" style={{ fontSize: '12px', cursor: 'pointer' }}>
+                {record.customCode}
+              </Typography.Text>
+            </a>
+          )}
+        </Space>
+      )
     },
     {
-      title: '自编码',
-      dataIndex: 'customCode',
-      key: 'customCode',
+      title: '设备类别/品牌',
+      key: 'category-brand',
       width: 150,
-      ellipsis: true
+      ellipsis: true,
+      filters: [
+        { text: '高空车', value: '高空车' },
+        { text: '叉车', value: '叉车' },
+        { text: '吊车', value: '吊车' },
+        { text: '车载高空车', value: '车载高空车' }
+      ],
+      onFilter: (value: React.Key | boolean, record: Equipment) => record.category === value,
+      render: (_: any, record: Equipment) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text>{record.category || '-'}</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: '12px' }}>
+            {record.brand || '-'}
+          </Typography.Text>
+        </Space>
+      )
     },
     {
-      title: '类型',
-      dataIndex: 'type',
-      key: 'type',
-      width: 120,
+      title: '设备类型/型号',
+      key: 'type-model',
+      width: 180,
       filters: [
-        { text: '剪刀车', value: '剪刀车' },
+        { text: '剪叉车', value: '剪叉车' },
         { text: '直臂车', value: '直臂车' },
-        { text: '曲臂车', value: '曲臂车' }
+        { text: '曲臂车', value: '曲臂车' },
+        { text: '履带剪叉', value: '履带剪叉' },
+        { text: '套筒车', value: '套筒车' },
+        { text: '蜘蛛车', value: '蜘蛛车' },
+        { text: '吸盘车', value: '吸盘车' }
       ],
       onFilter: (value: React.Key | boolean, record: Equipment) => record.type === value,
-      render: (text: string) => {
+      render: (_: any, record: Equipment) => {
         let color = '';
-        switch (text) {
-          case '剪刀车':
+        const type = record.type || '';
+        switch (type) {
+          case '剪叉车':
             color = '#1890ff';
             break;
           case '直臂车':
@@ -579,13 +868,28 @@ const EquipmentProfile: React.FC = () => {
           case '曲臂车':
             color = '#faad14';
             break;
+          case '履带剪叉':
+            color = '#722ed1';
+            break;
+          case '套筒车':
+            color = '#13c2c2';
+            break;
+          case '蜘蛛车':
+            color = '#eb2f96';
+            break;
+          case '吸盘车':
+            color = '#fa8c16';
+            break;
           default:
             color = '#8c8c8c';
         }
         return (
-          <Tag color={color}>
-            {text}
-          </Tag>
+          <Space direction="vertical" size={0}>
+            <Tag color={color}>{type || '-'}</Tag>
+            <Typography.Text type="secondary" style={{ fontSize: '12px' }}>
+              {record.model || '-'}
+            </Typography.Text>
+          </Space>
         );
       }
     },
@@ -596,20 +900,6 @@ const EquipmentProfile: React.FC = () => {
       width: 100,
       sorter: (a: Equipment, b: Equipment) => Number(a.height) - Number(b.height),
       render: formatHeight
-    },
-    {
-      title: '型号',
-      dataIndex: 'model',
-      key: 'model',
-      width: 150,
-      ellipsis: true
-    },
-    {
-      title: '品牌',
-      dataIndex: 'brand',
-      key: 'brand',
-      width: 120,
-      ellipsis: true
     },
     {
       title: '设备来源',
@@ -629,9 +919,10 @@ const EquipmentProfile: React.FC = () => {
       key: 'rentalStatus',
       width: 120,
       filters: [
+        { text: '待租', value: 'available' },
         { text: '在租', value: 'renting' },
-        { text: '待租', value: 'waiting' },
-        { text: '维修', value: 'repairing' }
+        { text: '维修中', value: 'repairing' },
+        { text: '已退役', value: 'retired' }
       ],
       onFilter: (value: React.Key | boolean, record: Equipment) => record.rentalStatus === value,
       render: renderRentalStatus
@@ -648,13 +939,14 @@ const EquipmentProfile: React.FC = () => {
       title: '保险状态',
       dataIndex: 'insuranceStatus',
       key: 'insuranceStatus',
-      width: 120,
+      width: 140,
       filters: [
         { text: '在保', value: 'insured' },
+        { text: '即将到期', value: 'expiring' },
         { text: '脱保', value: 'uninsured' }
       ],
       onFilter: (value: React.Key | boolean, record: Equipment) => record.insuranceStatus === value,
-      render: renderInsuranceStatus
+      render: (status: string, record: Equipment) => renderInsuranceStatus(status, record)
     },
     {
       title: '所在仓库',
@@ -670,79 +962,79 @@ const EquipmentProfile: React.FC = () => {
       }
     },
     {
-        title: '操作',
-        key: 'action',
-        width: 140,
-        fixed: 'right',
-        render: (_, record) => {
-          const items = [
-            {
-              key: 'edit',
-              label: (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <EditOutlined />
-                  <span>编辑</span>
-                </div>
-              ),
-            },
-            {
-              key: 'attachment',
-              label: (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <PaperClipOutlined />
-                  <span>附件</span>
-                </div>
-              ),
-            },
-            { type: 'divider' as const },
-            {
-              key: 'share',
-              label: (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <ShareAltOutlined />
-                  <span>分享</span>
-                </div>
-              ),
-            },
-            {
-              key: 'delete',
-              label: (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#ff4d4f' }}>
-                  <DeleteOutlined />
-                  <span>删除</span>
-                </div>
-              ),
-            },
-          ];
-          return (
-            <Dropdown
-              trigger={["hover"]}
-              placement="bottomRight"
-              arrow
-              menu={{
-                items,
-                onClick: ({ key }: { key: string }) => {
-                  if (key === 'edit') return handleEditEquipment(record);
-                  if (key === 'attachment') return showAttachmentModal(record);
-                  if (key === 'share') return handleShareEquipment(record);
-                  if (key === 'delete') {
-                    Modal.confirm({
-                      title: '确认删除',
-                      content: '确定要删除该设备吗？删除后不可恢复。',
-                      okText: '确认',
-                      cancelText: '取消',
-                      okButtonProps: { danger: true },
-                      onOk: () => handleDeleteEquipment(record.id),
-                    });
-                  }
-                },
-              }}
-            >
-              <Button type="link" icon={<MoreOutlined />}>操作</Button>
-            </Dropdown>
-          );
-        },
-      }
+      title: '操作',
+      key: 'action',
+      width: 140,
+      fixed: 'right',
+      render: (_, record) => {
+        const items = [
+          {
+            key: 'edit',
+            label: (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <EditOutlined />
+                <span>编辑</span>
+              </div>
+            ),
+          },
+          {
+            key: 'attachment',
+            label: (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <PaperClipOutlined />
+                <span>附件</span>
+              </div>
+            ),
+          },
+          { type: 'divider' as const },
+          {
+            key: 'share',
+            label: (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <ShareAltOutlined />
+                <span>分享</span>
+              </div>
+            ),
+          },
+          {
+            key: 'delete',
+            label: (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#ff4d4f' }}>
+                <DeleteOutlined />
+                <span>删除</span>
+              </div>
+            ),
+          },
+        ];
+        return (
+          <Dropdown
+            trigger={["hover"]}
+            placement="bottomRight"
+            arrow
+            menu={{
+              items,
+              onClick: ({ key }: { key: string }) => {
+                if (key === 'edit') return handleEditEquipment(record);
+                if (key === 'attachment') return showAttachmentModal(record);
+                if (key === 'share') return handleShareEquipment(record);
+                if (key === 'delete') {
+                  Modal.confirm({
+                    title: '确认删除',
+                    content: '确定要删除该设备吗？删除后不可恢复。',
+                    okText: '确认',
+                    cancelText: '取消',
+                    okButtonProps: { danger: true },
+                    onOk: () => handleDeleteEquipment(record.id),
+                  });
+                }
+              },
+            }}
+          >
+            <Button type="link" icon={<MoreOutlined />}>操作</Button>
+          </Dropdown>
+        );
+      },
+    }
   ];
 
   return (
@@ -753,18 +1045,17 @@ const EquipmentProfile: React.FC = () => {
           <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
             <Typography.Title level={4} style={{ margin: 0 }}>设备管理</Typography.Title>
             <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-              <Search
-                placeholder="设备编码"
+              <Select
+                placeholder="设备类别"
                 allowClear
-                style={{ width: 200 }}
-                onChange={(e) => handleSearch('code', e.target.value)}
-              />
-              <Search
-                placeholder="自编码"
-                allowClear
-                style={{ width: 200 }}
-                onChange={(e) => handleSearch('customCode', e.target.value)}
-              />
+                style={{ width: 150 }}
+                onChange={(value) => handleSearch('category', value)}
+              >
+                <Option value="高空车">高空车</Option>
+                <Option value="叉车">叉车</Option>
+                <Option value="吊车">吊车</Option>
+                <Option value="车载高空车">车载高空车</Option>
+              </Select>
               <Select
                 placeholder="设备类型"
                 allowClear
@@ -774,7 +1065,37 @@ const EquipmentProfile: React.FC = () => {
                 <Option value="剪刀车">剪刀车</Option>
                 <Option value="直臂车">直臂车</Option>
                 <Option value="曲臂车">曲臂车</Option>
+                <Option value="蜘蛛车">蜘蛛车</Option>
+                <Option value="吸盘车">吸盘车</Option>
               </Select>
+              <Select
+                placeholder="品牌"
+                allowClear
+                style={{ width: 150 }}
+                onChange={(value) => handleSearch('brand', value)}
+              >
+                {brandOptions.map(brand => (
+                  <Option key={brand} value={brand}>{brand}</Option>
+                ))}
+              </Select>
+              <Input
+                placeholder="设备型号"
+                allowClear
+                style={{ width: 150 }}
+                onChange={(e) => handleSearch('model', e.target.value)}
+              />
+              <Input
+                placeholder="出厂编号"
+                allowClear
+                style={{ width: 150 }}
+                onChange={(e) => handleSearch('code', e.target.value)}
+              />
+              <Input
+                placeholder="自编码"
+                allowClear
+                style={{ width: 150 }}
+                onChange={(e) => handleSearch('customCode', e.target.value)}
+              />
               <Input
                 placeholder="高度"
                 allowClear
@@ -784,7 +1105,7 @@ const EquipmentProfile: React.FC = () => {
             </div>
           </div>
           <div style={{ display: 'flex', gap: '12px' }}>
-            <Button type="default" icon={<UploadOutlined />} onClick={handleBatchImport}>
+            <Button type="default" icon={<PlusOutlined />} onClick={handleBatchImport}>
               批量导入
             </Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={handleAddEquipment}>
@@ -834,35 +1155,34 @@ const EquipmentProfile: React.FC = () => {
           layout="vertical"
           initialValues={{
             source: 'self-owned',
-            rentalStatus: 'waiting',
+            rentalStatus: 'available',  // 修复：使用标准状态值
             insuranceStatus: 'insured',
           }}
           className="equipment-form"
         >
+          {/* 第一行：设备类别、设备类型 */}
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item
-                name="brand"
-                label="品牌"
-                rules={[{ required: true, message: '请选择设备品牌' }]}
-                extra="选择品牌后，类型与类别将动态过滤，型号最终按三项筛选"
+                name="category"
+                label="设备类别"
+                rules={[{ required: true, message: '请选择设备类别' }]}
               >
                 <Select
-                  placeholder="请选择品牌"
+                  placeholder="请选择设备类别"
                   showSearch
-                  allowClear
                   optionFilterProp="children"
                   disabled={modelLocked}
-                  onChange={(brand) => {
-                    setSelectedBrand(brand);
+                  onChange={(cat) => {
+                    setSelectedCategory(cat);
                     setSelectedType(undefined);
-                    setSelectedCategory(undefined);
-                    form.setFieldsValue({ type: undefined, category: undefined, modelId: undefined });
+                    setSelectedBrand(undefined);
+                    form.setFieldsValue({ type: undefined, brand: undefined, modelId: undefined });
                     setModelLocked(false);
                   }}
                 >
-                  {brandOptions.map(b => (
-                    <Option key={b} value={b}>{b}</Option>
+                  {categoryOptions.map(c => (
+                    <Option key={c} value={c}>{c}</Option>
                   ))}
                 </Select>
               </Form.Item>
@@ -874,15 +1194,15 @@ const EquipmentProfile: React.FC = () => {
                 rules={[{ required: true, message: '请选择设备类型' }]}
               >
                 <Select
-                  placeholder={selectedBrand ? '请选择设备类型（已按品牌过滤）' : '请先选择品牌'}
+                  placeholder={selectedCategory ? '请选择设备类型（已按类别过滤）' : '请先选择设备类别'}
                   showSearch
                   optionFilterProp="children"
-                  disabled={!selectedBrand || modelLocked}
-                  notFoundContent={selectedBrand ? <Empty description="该品牌下暂无类型，请先维护型号数据" /> : null}
+                  disabled={!selectedCategory || modelLocked}
+                  notFoundContent={selectedCategory ? <Empty description="该类别下暂无类型，请先维护型号数据" /> : null}
                   onChange={(type) => {
                     setSelectedType(type);
-                    setSelectedCategory(undefined);
-                    form.setFieldsValue({ category: undefined, modelId: undefined });
+                    setSelectedBrand(undefined);
+                    form.setFieldsValue({ brand: undefined, modelId: undefined });
                   }}
                 >
                   {typeOptions.map(t => (
@@ -892,27 +1212,30 @@ const EquipmentProfile: React.FC = () => {
               </Form.Item>
             </Col>
           </Row>
-      
+
+          {/* 第二行：品牌、设备型号 */}
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item
-                name="category"
-                label="设备类别"
-                rules={[{ required: true, message: '请选择设备类别' }]}
+                name="brand"
+                label="品牌"
+                rules={[{ required: true, message: '请选择设备品牌' }]}
+                extra="选择类别和类型后，品牌将动态过滤"
               >
                 <Select
-                  placeholder={selectedType ? '请选择设备类别（已按品牌/类型过滤）' : '请先选择品牌和类型'}
+                  placeholder={selectedType ? '请选择品牌（已按类别/类型过滤）' : '请先选择类别和类型'}
                   showSearch
+                  allowClear
                   optionFilterProp="children"
-                  disabled={!selectedBrand || !selectedType || modelLocked}
-                  notFoundContent={selectedBrand && selectedType ? <Empty description="该品牌/类型下暂无类别，请先维护型号数据" /> : null}
-                  onChange={(cat) => {
-                    setSelectedCategory(cat);
+                  disabled={!selectedCategory || !selectedType || modelLocked}
+                  notFoundContent={selectedType ? <Empty description="该类别/类型下暂无品牌，请先维护型号数据" /> : null}
+                  onChange={(brand) => {
+                    setSelectedBrand(brand);
                     form.setFieldsValue({ modelId: undefined });
                   }}
                 >
-                  {categoryOptions.map(c => (
-                    <Option key={c} value={c}>{c}</Option>
+                  {brandOptions.map(b => (
+                    <Option key={b} value={b}>{b}</Option>
                   ))}
                 </Select>
               </Form.Item>
@@ -920,18 +1243,18 @@ const EquipmentProfile: React.FC = () => {
             <Col span={12}>
               <Form.Item
                 name="modelId"
-                label="型号"
-                rules={[{ required: true, message: '请选择型号' }]}
+                label="设备型号"
+                rules={[{ required: true, message: '请选择设备型号' }]}
               >
                 <Select
                   placeholder={
-                    selectedBrand
+                    selectedCategory
                       ? (selectedType
-                        ? (selectedCategory
-                          ? '请选择型号（已按品牌/类型/类别过滤）'
-                          : '请选择型号（已按品牌/类型过滤）')
-                        : '请选择型号（已按品牌过滤）')
-                      : '请先选择品牌'
+                        ? (selectedBrand
+                          ? '请选择型号（已按类别/类型/品牌过滤）'
+                          : '请选择型号（已按类别/类型过滤）')
+                        : '请选择型号（已按类别过滤）')
+                      : '请先选择设备类别'
                   }
                   showSearch
                   allowClear
@@ -952,7 +1275,12 @@ const EquipmentProfile: React.FC = () => {
               </Form.Item>
             </Col>
           </Row>
-      
+
+          {/* 隐藏字段：存储型号名称 */}
+          <Form.Item name="model" hidden>
+            <Input />
+          </Form.Item>
+
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item
@@ -984,15 +1312,14 @@ const EquipmentProfile: React.FC = () => {
             <Col span={12}>
               <Form.Item
                 name="code"
-                label="设备编码"
-                rules={[{ required: true, message: '请输入设备编码' }]}
+                label="出厂编号"
+                rules={[{ required: true, message: '请输入出厂编号' }]}
               >
                 <Input
-                  placeholder="请输入设备编码"
+                  placeholder="请输入出厂编号"
                   onChange={() => {
-                    // 修正后解除禁用并清除错误
+                    // 修正后解除禁用
                     setSaveDisabled(false);
-                    form.setFields([{ name: 'code', errors: [] }]);
                   }}
                 />
               </Form.Item>
@@ -1007,13 +1334,12 @@ const EquipmentProfile: React.FC = () => {
                   placeholder="请输入自编号"
                   onChange={() => {
                     setSaveDisabled(false);
-                    form.setFields([{ name: 'customCode', errors: [] }]);
                   }}
                 />
               </Form.Item>
             </Col>
           </Row>
-      
+
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item name="purchaseDate" label="采购日期">
@@ -1026,21 +1352,42 @@ const EquipmentProfile: React.FC = () => {
               </Form.Item>
             </Col>
           </Row>
-      
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item 
+                name="purchasePrice" 
+                label="采购价格"
+                tooltip="设备的采购价格，用于计算资产利用率"
+              >
+                <InputNumber 
+                  style={{ width: '100%' }} 
+                  min={0}
+                  precision={2}
+                  placeholder="请输入采购价格"
+                  addonAfter="元"
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              {/* 预留位置，可添加其他字段 */}
+            </Col>
+          </Row>
+
           <Form.Item label="附件上传">
-            <Upload.Dragger
+            <Upload
               {...attachmentUploadProps}
+              listType="picture-card"
               fileList={attachmentFiles}
               onChange={onAttachmentChange}
             >
-              <p className="ant-upload-drag-icon">
-                <FileAddOutlined />
-              </p>
-              <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
-              <p className="ant-upload-hint">支持多文件上传</p>
-            </Upload.Dragger>
+              <div>
+                <PlusOutlined />
+                <div style={{ marginTop: 8 }}>上传</div>
+              </div>
+            </Upload>
           </Form.Item>
-      
+
           <div style={{ marginTop: '24px', paddingTop: '24px', borderTop: '1px solid #f0f0f0' }}>
             <Typography.Text type="secondary">
               带 <span style={{ color: '#ff4d4f' }}>*</span> 的为必填项
@@ -1060,15 +1407,18 @@ const EquipmentProfile: React.FC = () => {
         {...modalConfig}
       >
         <div style={{ marginBottom: '20px' }}>
-          <Upload.Dragger {...attachmentUploadProps}>
-            <p className="ant-upload-drag-icon">
-              <FileAddOutlined />
-            </p>
-            <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
-            <p className="ant-upload-hint">支持单个或批量上传附件</p>
-          </Upload.Dragger>
+          <Upload
+            {...attachmentUploadProps}
+            listType="picture-card"
+          >
+            <div>
+              <PlusOutlined />
+              <div style={{ marginTop: 8 }}>上传</div>
+            </div>
+          </Upload>
         </div>
-        <Divider>已上传附件</Divider>
+        {/* 设备自身附件 */}
+        <Divider>设备附件</Divider>
         <div>
           {selectedEquipment?.attachments && selectedEquipment.attachments.length > 0 ? (
             <Space direction="vertical" style={{ display: 'block' }}>
@@ -1087,7 +1437,64 @@ const EquipmentProfile: React.FC = () => {
               ))}
             </Space>
           ) : (
-            <Empty description="暂无附件" />
+            <Empty description="暂无设备附件" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          )}
+        </div>
+
+        {/* 保单附件 */}
+        <Divider>保单附件（在保时显示）</Divider>
+        <div>
+          {policyAttachments && policyAttachments.length > 0 ? (
+            <Space direction="vertical" style={{ display: 'block' }}>
+              {policyAttachments.map((item) => (
+                <div key={`${item.policy_id}-${item.id}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px', border: '1px solid #e6f7ff', borderRadius: '4px', backgroundColor: '#f0f9ff' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <Tag color="green">保单</Tag>
+                    <span style={{ fontWeight: 500 }}>{item.name}</span>
+                    <Tag color="blue">{friendlyType(item.mime_type, item.name)}</Tag>
+                    <Typography.Text type="secondary">{formatBytes(item.size)}</Typography.Text>
+                    <Typography.Text type="secondary" style={{ fontSize: '12px' }}>
+                      保单号: {item.policy_number}
+                    </Typography.Text>
+                  </div>
+                  <Space>
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<DownloadOutlined />}
+                      onClick={() => {
+                        const token = localStorage.getItem('auth_token');
+                        fetch(`/api/policies/${item.policy_id}/attachments/${item.id}`, {
+                          headers: {
+                            'Authorization': `Bearer ${token}`
+                          }
+                        })
+                          .then(response => response.blob())
+                          .then(blob => {
+                            const url = window.URL.createObjectURL(blob);
+                            const link = document.createElement('a');
+                            link.href = url;
+                            link.download = item.name;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                            window.URL.revokeObjectURL(url);
+                            message.success('下载成功');
+                          })
+                          .catch(error => {
+                            console.error('下载失败:', error);
+                            message.error('下载失败');
+                          });
+                      }}
+                    >
+                      下载
+                    </Button>
+                  </Space>
+                </div>
+              ))}
+            </Space>
+          ) : (
+            <Empty description="该设备暂无有效保单附件" image={Empty.PRESENTED_IMAGE_SIMPLE} />
           )}
         </div>
       </Modal>
@@ -1114,19 +1521,13 @@ const EquipmentProfile: React.FC = () => {
                 上传前请先下载模板，并按照模板格式填写数据。
               </Typography.Paragraph>
             </div>
-            
+
             {!isImporting ? (
               <>
-                <Upload.Dragger {...batchImportUploadProps}>
-                  <p className="ant-upload-drag-icon">
-                    <UploadOutlined />
-                  </p>
-                  <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
-                  <p className="ant-upload-hint">
-                    支持 .xlsx, .xls, .csv 格式文件
-                  </p>
-                </Upload.Dragger>
-                
+                <Upload {...batchImportUploadProps}>
+                  <Button icon={<PlusOutlined />}>点击上传文件</Button>
+                </Upload>
+
                 <div style={{ marginTop: '20px', textAlign: 'center' }}>
                   <Button type="default" onClick={downloadImportTemplate}>
                     下载导入模板
@@ -1143,16 +1544,16 @@ const EquipmentProfile: React.FC = () => {
                     <Typography.Text type="secondary">导入进度</Typography.Text>
                     <Typography.Text>{batchImportProgress}%</Typography.Text>
                   </div>
-                  <div style={{ 
-                    height: '8px', 
-                    backgroundColor: '#f0f0f0', 
+                  <div style={{
+                    height: '8px',
+                    backgroundColor: '#f0f0f0',
                     borderRadius: '4px',
                     overflow: 'hidden'
                   }}>
-                    <div 
-                      style={{ 
-                        height: '100%', 
-                        width: `${batchImportProgress}%`, 
+                    <div
+                      style={{
+                        height: '100%',
+                        width: `${batchImportProgress}%`,
                         backgroundColor: '#1890ff',
                         transition: 'width 0.3s ease'
                       }}
@@ -1167,32 +1568,32 @@ const EquipmentProfile: React.FC = () => {
             <Typography.Title level={5} style={{ marginBottom: '20px' }}>
               导入结果
             </Typography.Title>
-            
+
             <div style={{ marginBottom: '24px' }}>
               <Row gutter={16}>
                 <Col span={12}>
                   <Card>
-                    <Statistic 
-                      title="成功导入" 
+                    <Statistic
+                      title="成功导入"
                       value={batchImportResult.success}
-                      suffix="台设备" 
+                      suffix="台设备"
                       valueStyle={{ color: '#52c41a' }}
                     />
                   </Card>
                 </Col>
                 <Col span={12}>
                   <Card>
-                    <Statistic 
-                      title="导入失败" 
+                    <Statistic
+                      title="导入失败"
                       value={batchImportResult.failed}
-                      suffix="台设备" 
+                      suffix="台设备"
                       valueStyle={{ color: '#ff4d4f' }}
                     />
                   </Card>
                 </Col>
               </Row>
             </div>
-            
+
             {batchImportResult.failedItems.length > 0 && (
               <div>
                 <Typography.Text strong style={{ display: 'block', marginBottom: '12px' }}>
@@ -1200,20 +1601,23 @@ const EquipmentProfile: React.FC = () => {
                 </Typography.Text>
                 <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
                   {batchImportResult.failedItems.map((item, index) => (
-                    <div key={index} style={{ 
-                      padding: '12px', 
-                      marginBottom: '8px', 
-                      backgroundColor: '#fff2f0', 
-                      border: '1px solid #ffccc7', 
-                      borderRadius: '4px' 
+                    <div key={index} style={{
+                      padding: '12px',
+                      marginBottom: '8px',
+                      backgroundColor: '#fff2f0',
+                      border: '1px solid #ffccc7',
+                      borderRadius: '4px'
                     }}>
-                      <div style={{ marginBottom: '4px' }}>
-                        <Typography.Text type="danger">
-                          行 {item.index}：{item.error}
+                      <div style={{ marginBottom: '6px' }}>
+                        <Typography.Text type="danger" strong>
+                          第 {item.index} 行：{item.error}
                         </Typography.Text>
                       </div>
-                      <div style={{ color: '#666', fontSize: '12px' }}>
-                        {JSON.stringify(item.data)}
+                      <div style={{ color: '#666', fontSize: '12px', lineHeight: '20px' }}>
+                        <div><strong>出厂编号：</strong>{item.data.code || '-'}</div>
+                        <div><strong>自编号：</strong>{item.data.customCode || '-'}</div>
+                        <div><strong>设备类型：</strong>{item.data.type || '-'} / {item.data.height || '-'}米</div>
+                        <div><strong>品牌型号：</strong>{item.data.brand || '-'} {item.data.model || '-'}</div>
                       </div>
                     </div>
                   ))}
@@ -1224,14 +1628,21 @@ const EquipmentProfile: React.FC = () => {
         )}
       </Modal>
 
+      {/* 设备详情抽屉 */}
+      <EquipmentDetailDrawer
+        open={detailDrawerVisible}
+        onClose={() => setDetailDrawerVisible(false)}
+        equipment={detailEquipment}
+      />
+
       {error && (
-        <div style={{ 
-          color: '#ff4d4f', 
-          marginTop: '16px', 
-          padding: '12px 16px', 
-          backgroundColor: '#fff2f0', 
-          border: '1px solid #ffccc7', 
-          borderRadius: '4px' 
+        <div style={{
+          color: '#ff4d4f',
+          marginTop: '16px',
+          padding: '12px 16px',
+          backgroundColor: '#fff2f0',
+          border: '1px solid #ffccc7',
+          borderRadius: '4px'
         }}>
           {error}
         </div>

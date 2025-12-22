@@ -60,8 +60,20 @@ const ModelManagement: React.FC = () => {
     { title: '设备类型', dataIndex: 'type', key: 'type', width: 140 },
     { title: '高度(米)', dataIndex: 'height', key: 'height', width: 120 },
     { title: '驱动类型', dataIndex: 'driveType', key: 'driveType', width: 120 },
-    { title: '创建时间', dataIndex: 'createdAt', key: 'createdAt', width: 180 },
-    { title: '更新时间', dataIndex: 'updatedAt', key: 'updatedAt', width: 180 },
+    {
+      title: '创建时间',
+      dataIndex: 'createdAt',
+      key: 'createdAt',
+      width: 120,
+      render: (text: string) => text ? new Date(text).toLocaleDateString('zh-CN') : '-'
+    },
+    {
+      title: '更新时间',
+      dataIndex: 'updatedAt',
+      key: 'updatedAt',
+      width: 120,
+      render: (text: string) => text ? new Date(text).toLocaleDateString('zh-CN') : '-'
+    },
     {
       title: '操作',
       key: 'action',
@@ -81,7 +93,7 @@ const ModelManagement: React.FC = () => {
     setLoading(true);
     try {
       const data = await apiGet<EquipmentModel[]>('/models');
-      setModels(data);
+      setModels(data || []);
     } catch (err: any) {
       message.error(err?.message || '加载型号列表失败');
     } finally {
