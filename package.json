@@ -21,6 +21,8 @@
     "clean:preview": "node scripts/clean_for_production.js --dry-run",
     "clean:production": "node scripts/clean_for_production.js",
     "deploy:check": "echo 请查看 DEPLOYMENT_CHECKLIST.md",
+    "package": "bash scripts/package-for-deployment.sh",
+    "package:win": "powershell -ExecutionPolicy Bypass -File scripts/package-for-deployment.ps1",
     "schema:export": "node scripts/export-master-schema.mjs",
     "schema:verify": "node scripts/verify-all-tenants-vs-master.mjs"
   },
