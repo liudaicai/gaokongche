@@ -60,7 +60,7 @@ export const createFinanceRecord = createAsyncThunk(
   'finance/createRecord',
   async (formData: FormData) => {
     // 使用FormData支持文件上传
-    const token = localStorage.getItem('auth_token');
+    const token = sessionStorage.getItem('auth_token');
     const response = await fetch('/api/finance', {
       method: 'POST',
       headers: {
@@ -82,7 +82,7 @@ export const createFinanceRecord = createAsyncThunk(
 export const updateFinanceRecord = createAsyncThunk(
   'finance/updateRecord',
   async ({ id, formData }: { id: number; formData: FormData }) => {
-    const token = localStorage.getItem('auth_token');
+    const token = sessionStorage.getItem('auth_token');
     const response = await fetch(`/api/finance/${id}`, {
       method: 'PUT',
       headers: {
@@ -115,7 +115,7 @@ export const exportReceipts = createAsyncThunk(
     const queryString = new URLSearchParams(params as any).toString();
     const url = `/finance/export/receipts?${queryString}`;
     
-    const token = localStorage.getItem('auth_token');
+    const token = sessionStorage.getItem('auth_token');
     const response = await fetch(`/api${url}`, {
       headers: {
         'Authorization': `Bearer ${token}`
@@ -147,7 +147,7 @@ export const exportPayments = createAsyncThunk(
     const queryString = new URLSearchParams(params as any).toString();
     const url = `/finance/export/payments?${queryString}`;
     
-    const token = localStorage.getItem('auth_token');
+    const token = sessionStorage.getItem('auth_token');
     const response = await fetch(`/api${url}`, {
       headers: {
         'Authorization': `Bearer ${token}`

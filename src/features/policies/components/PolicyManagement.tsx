@@ -165,7 +165,7 @@ const PolicyManagement: React.FC = () => {
         console.log(pair[0] + ': ' + pair[1]);
       }
 
-      const token = localStorage.getItem('auth_token');
+      const token = sessionStorage.getItem('auth_token');
       const url = isEditing && currentPolicy
         ? `/api/policies/${currentPolicy.id}`
         : '/api/policies';
@@ -213,7 +213,7 @@ const PolicyManagement: React.FC = () => {
   // 下载保单附件
   const handleDownloadAttachment = async (policyId: string | number, attachmentId: string | number) => {
     try {
-      const token = localStorage.getItem('auth_token');
+      const token = sessionStorage.getItem('auth_token');
       const response = await fetch(`/api/policies/${policyId}/attachments/${attachmentId}`, {
         headers: {
           'Authorization': `Bearer ${token}`

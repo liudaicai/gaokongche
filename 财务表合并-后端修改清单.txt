@@ -1,0 +1,187 @@
+===============================================
+  财务表合并 - 后端代码修改清单
+===============================================
+
+【重要】表合并说明：
+  order_receipts + order_refunds → finance_records
+  需要在所有查询中添加 WHERE record_type = 'receipt'/'refund'
+
+===============================================
+
+✅ 第一步：创建服务层（已完成）
+  ✓ server/services/financeService.js - 已创建
+
+===============================================
+
+📝 第二步：修改 server/routes/orders.mysql.js（15处）
+
+需要修改的位置（从上到下）：
+
+1. [ ] 行 66-71：仪表板统计查询
+   FROM order_receipts → FROM finance_records WHERE record_type = 'receipt'
+   FROM order_refunds → FROM finance_records WHERE record_type = 'refund'
+
+2. [ ] 行 121-122：COUNT 查询
+   FROM order_receipts WHERE order_id = ? 
+   → FROM finance_records WHERE order_id = ? AND record_type = 'receipt'
+   
+   FROM order_refunds WHERE order_id = ?
+   → FROM finance_records WHERE order_id = ? AND record_type = 'refund'
+
+3. [ ] 行 348-349：SUM 查询
+   推荐使用：
+   const receiptsSum = await financeService.getReceiptSum(id);
+   const refundsSum = await financeService.getRefundSum(id);
+
+4. [ ] 行 488：SELECT 收款记录
+   推荐使用：
+   const receipts = await financeService.getReceipts(id);
+
+5. [ ] 行 523：SELECT 退款记录
+   推荐使用：
+   const refunds = await financeService.getRefunds(id);
+
+6. [ ] 行 1196-1197：DELETE 财务记录
+   推荐使用：
+   await financeService.deleteAllByOrderId(id);
+
+7. [ ] 行 1960：INSERT 收款记录
+   推荐使用：
+   await financeService.createReceipt({ orderId, amount, receiptDate, ... });
+
+8. [ ] 行 2066：SELECT 单条收款记录
+   推荐使用：
+   const receipt = await financeService.getReceiptById(receiptId, orderId);
+
+9. [ ] 行 2089：DELETE 收款记录
+   推荐使用：
+   await financeService.deleteRecord(receiptId, orderId, 'receipt');
+
+10. [ ] 行 2155：INSERT 退款记录
+    推荐使用：
+    await financeService.createRefund({ orderId, amount, refundDate, ... });
+
+11. [ ] 行 2249：SELECT 单条退款记录
+    推荐使用：
+    const refund = await financeService.getRefundById(refundId, orderId);
+
+12. [ ] 行 2272：DELETE 退款记录
+    推荐使用：
+    await financeService.deleteRecord(refundId, orderId, 'refund');
+
+重要提示：
+  - 在文件顶部添加：const financeService = require('../services/financeService');
+  - 使用服务可以保持字段映射一致性
+
+===============================================
+
+📝 第三步：修改 server/routes/dashboard.mysql.js（2处）
+
+1. [ ] 行 81：收款统计查询
+   FROM order_receipts → FROM finance_records WHERE record_type = 'receipt'
+
+2. [ ] 行 175：收款趋势查询
+   FROM order_receipts → FROM finance_records WHERE record_type = 'receipt'
+
+===============================================
+
+📝 第四步：修改 server/routes/payments.mysql.js（10+处）
+
+建议方案：
+1. 在文件顶部添加：const financeService = require('../services/financeService');
+
+2. 将所有 order_receipts 相关的查询改为使用 financeService 或添加条件：
+   - FROM order_receipts → FROM finance_records WHERE record_type = 'receipt'
+   - INSERT INTO order_receipts → INSERT INTO finance_records (添加 record_type = 'receipt')
+   - UPDATE order_receipts → UPDATE finance_records WHERE record_type = 'receipt'
+   - DELETE FROM order_receipts → DELETE FROM finance_records WHERE record_type = 'receipt'
+
+3. 字段映射：
+   - receipt_date → record_date
+   - receipt_notes → remark
+   - receipt_method → payment_method
+
+具体位置：
+- 行 43：COUNT 查询
+- 行 49：SELECT 列表查询
+- 行 87：SELECT 详情查询
+- 行 111：INSERT 查询
+- 行 193：UPDATE 查询
+- 行 225：DELETE 查询
+- 行 250：UPDATE 状态查询
+- 行 283：SELECT by id
+- 行 296：UPDATE 查询
+- 行 339：SELECT with JOIN
+- 行 387：SELECT 统计查询
+
+===============================================
+
+🧪 第五步：测试清单
+
+功能测试：
+[ ] 1. 查看订单详情（收款退款记录显示正常）
+[ ] 2. 创建收款记录
+[ ] 3. 创建退款记录
+[ ] 4. 修改收款记录
+[ ] 5. 修改退款记录
+[ ] 6. 删除收款记录
+[ ] 7. 删除退款记录
+[ ] 8. 删除订单（财务记录一起删除）
+[ ] 9. 仪表板统计（收款退款数据正确）
+[ ] 10. 支付管理列表（数据正确）
+[ ] 11. 财务报表（数据正确）
+
+数据验证：
+[ ] 收款记录的 record_type 为 'receipt'
+[ ] 退款记录的 record_type 为 'refund'
+[ ] record_number 自动生成（REC-00000001 / REF-00000001）
+[ ] 日期字段正确映射
+[ ] 金额统计正确
+
+===============================================
+
+⚠️ 注意事项
+
+1. 字段映射：
+   receipt_date → record_date (AS receipt_date 保持前端兼容)
+   receipt_notes → remark (AS receipt_notes 保持前端兼容)
+   refund_date → record_date (AS refund_date 保持前端兼容)
+   refund_reason → remark (AS refund_reason 保持前端兼容)
+
+2. 每个查询必须添加 WHERE record_type = 'receipt'/'refund'
+
+3. 使用 financeService 可以避免手动映射字段
+
+4. 如果有多租户，注意添加 company_id 过滤
+
+5. record_number 在 INSERT 后会自动生成，不需要手动指定
+
+===============================================
+
+📋 修改顺序建议
+
+1. 先修改 orders.mysql.js（最核心）
+2. 重启后端服务并测试订单功能
+3. 修改 dashboard.mysql.js（简单）
+4. 测试仪表板统计
+5. 修改 payments.mysql.js（复杂）
+6. 全面测试所有财务功能
+
+===============================================
+
+💡 快速查找命令（VS Code）
+
+Ctrl+F 查找以下内容：
+- order_receipts
+- order_refunds
+- receipt_date
+- refund_date
+- receipt_notes
+- refund_reason
+
+全局替换（谨慎使用）：
+- FROM order_receipts → FROM finance_records WHERE record_type = 'receipt'
+- FROM order_refunds → FROM finance_records WHERE record_type = 'refund'
+
+===============================================
+

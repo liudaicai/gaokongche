@@ -10,7 +10,7 @@ export default function buildRouter(pool) {
    * 获取设备使用率统计
    * Query: startMonth, endMonth
    */
-  router.get('/:equipmentId', async (req, res) => {
+  router.get('/:equipmentId', tenantMiddleware, async (req, res) => {
     try {
       const { equipmentId } = req.params;
       const { startMonth, endMonth } = req.query;
@@ -112,7 +112,7 @@ export default function buildRouter(pool) {
    * 获取所有设备使用率排行
    * Query: month (YYYY-MM-01), sortBy (utilization|income|profit), limit
    */
-  router.get('/ranking/list', async (req, res) => {
+  router.get('/ranking/list', tenantMiddleware, async (req, res) => {
     try {
       const { month, sortBy = 'utilization', limit = 50 } = req.query;
 
@@ -199,7 +199,7 @@ export default function buildRouter(pool) {
    * 计算/更新设备使用率统计
    * Body: { month: 'YYYY-MM-01' }
    */
-  router.post('/:equipmentId/calculate', async (req, res) => {
+  router.post('/:equipmentId/calculate', tenantMiddleware, async (req, res) => {
     try {
       const { equipmentId } = req.params;
       const { month } = req.body;
@@ -252,7 +252,7 @@ export default function buildRouter(pool) {
    * 批量计算所有设备的使用率
    * Body: { month: 'YYYY-MM-01' }
    */
-  router.post('/calculate-batch', async (req, res) => {
+  router.post('/calculate-batch', tenantMiddleware, async (req, res) => {
     try {
       const { month } = req.body;
 
@@ -301,7 +301,7 @@ export default function buildRouter(pool) {
    * GET /api/equipment-usage/overview/summary
    * 获取所有设备的使用率概览
    */
-  router.get('/overview/summary', async (req, res) => {
+  router.get('/overview/summary', tenantMiddleware, async (req, res) => {
     try {
       const [overview] = await pool.query(`
         SELECT * FROM v_equipment_usage_overview
@@ -336,4 +336,5 @@ export default function buildRouter(pool) {
 }
 
 import express from 'express';
+import { tenantMiddleware } from '../middleware/tenant.js';
 

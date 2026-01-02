@@ -3,11 +3,12 @@
  * 合同续约提醒 - API路由
  */
 import express from 'express';
+import { tenantMiddleware } from '../middleware/tenant.js';
 export default function buildContractRenewalsRouter(pool) {
   const router = express.Router();
 
   // 创建续约提醒
-  router.post('/:orderId/renewal-reminder', async (req, res) => {
+  router.post('/:orderId/renewal-reminder', tenantMiddleware, async (req, res) => {
     try {
       const { orderId } = req.params;
       const {
@@ -94,7 +95,7 @@ export default function buildContractRenewalsRouter(pool) {
   });
 
   // 获取订单的续约提醒列表
-  router.get('/:orderId/renewal-reminders', async (req, res) => {
+  router.get('/:orderId/renewal-reminders', tenantMiddleware, async (req, res) => {
     try {
       const { orderId } = req.params;
       // 一户一库，不需要租户过滤
@@ -134,7 +135,7 @@ export default function buildContractRenewalsRouter(pool) {
   });
 
   // 更新续约提醒
-  router.put('/:orderId/renewal-reminders/:id', async (req, res) => {
+  router.put('/:orderId/renewal-reminders/:id', tenantMiddleware, async (req, res) => {
     try {
       const { orderId, id } = req.params;
       const {
@@ -227,7 +228,7 @@ export default function buildContractRenewalsRouter(pool) {
   });
 
   // 删除续约提醒
-  router.delete('/:orderId/renewal-reminders/:id', async (req, res) => {
+  router.delete('/:orderId/renewal-reminders/:id', tenantMiddleware, async (req, res) => {
     try {
       const { orderId, id } = req.params;
       // 一户一库，不需要租户过滤
@@ -245,7 +246,7 @@ export default function buildContractRenewalsRouter(pool) {
   });
 
   // 标记续约提醒为已完成
-  router.put('/:orderId/renewal-reminders/:id/complete', async (req, res) => {
+  router.put('/:orderId/renewal-reminders/:id/complete', tenantMiddleware, async (req, res) => {
     try {
       const { orderId, id } = req.params;
       const { note } = req.body;

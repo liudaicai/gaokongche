@@ -1,4 +1,5 @@
 import express from 'express';
+import { tenantMiddleware } from '../middleware/tenant.js';
 
 function buildWorkflowsRouter(pool) {
   const router = express.Router();
@@ -28,7 +29,7 @@ function buildWorkflowsRouter(pool) {
   // ==================== 工作流定义管理 ====================
 
   // 获取工作流定义列表
-  router.get('/definitions', async (req, res) => {
+  router.get('/definitions', tenantMiddleware, async (req, res) => {
     try {
       const companyId = getCompanyId(req);
       if (!companyId) {
@@ -66,7 +67,7 @@ function buildWorkflowsRouter(pool) {
   });
 
   // 创建工作流定义
-  router.post('/definitions', async (req, res) => {
+  router.post('/definitions', tenantMiddleware, async (req, res) => {
     try {
       const companyId = getCompanyId(req);
       if (!companyId) {
@@ -102,7 +103,7 @@ function buildWorkflowsRouter(pool) {
   // ==================== 流程实例管理 ====================
 
   // 启动工作流
-  router.post('/instances/start', async (req, res) => {
+  router.post('/instances/start', tenantMiddleware, async (req, res) => {
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
@@ -185,7 +186,7 @@ function buildWorkflowsRouter(pool) {
   });
 
   // 获取我的待办任务
-  router.get('/tasks/pending', async (req, res) => {
+  router.get('/tasks/pending', tenantMiddleware, async (req, res) => {
     try {
       const companyId = getCompanyId(req);
       const userId = req.user?.id;
@@ -225,7 +226,7 @@ function buildWorkflowsRouter(pool) {
   });
 
   // 处理任务（审批/拒绝）
-  router.post('/tasks/:id/complete', async (req, res) => {
+  router.post('/tasks/:id/complete', tenantMiddleware, async (req, res) => {
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
@@ -318,7 +319,7 @@ function buildWorkflowsRouter(pool) {
   });
 
   // 获取流程实例详情
-  router.get('/instances/:id', async (req, res) => {
+  router.get('/instances/:id', tenantMiddleware, async (req, res) => {
     try {
       const instanceId = req.params.id;
       const companyId = getCompanyId(req);
@@ -366,7 +367,7 @@ function buildWorkflowsRouter(pool) {
   });
 
   // 获取流程实例列表
-  router.get('/instances', async (req, res) => {
+  router.get('/instances', tenantMiddleware, async (req, res) => {
     try {
       const companyId = getCompanyId(req);
       const { page = 1, pageSize = 20, status, businessType, initiatorId } = req.query;
@@ -427,7 +428,7 @@ function buildWorkflowsRouter(pool) {
   // ==================== 操作日志 ====================
 
   // 记录操作日志
-  router.post('/logs/operation', async (req, res) => {
+  router.post('/logs/operation', tenantMiddleware, async (req, res) => {
     try {
       const companyId = getCompanyId(req);
       const userId = req.user?.id;
@@ -466,7 +467,7 @@ function buildWorkflowsRouter(pool) {
   });
 
   // 查询操作日志
-  router.get('/logs/operation', async (req, res) => {
+  router.get('/logs/operation', tenantMiddleware, async (req, res) => {
     try {
       const companyId = getCompanyId(req);
       const { page = 1, pageSize = 50, module, userId, startDate, endDate } = req.query;
@@ -523,7 +524,7 @@ function buildWorkflowsRouter(pool) {
   // ==================== 统计数据 ====================
 
   // 获取工作流统计数据
-  router.get('/stats/dashboard', async (req, res) => {
+  router.get('/stats/dashboard', tenantMiddleware, async (req, res) => {
     try {
       const companyId = getCompanyId(req);
 

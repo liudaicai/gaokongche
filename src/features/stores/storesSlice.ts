@@ -1,11 +1,12 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
-import { Store, CompanyVerification, StoresState } from './types';
+import { Store, CompanyVerification, TenantCompany, StoresState } from './types';
 import { apiGet, apiPost, apiPut, apiDelete } from '../../api/client';
 
 // 初始状态
 const initialState: StoresState = {
   stores: [],
   companyVerifications: [],
+  tenantCompanies: [],
   loading: false,
   error: null
 };
@@ -21,17 +22,31 @@ export const fetchStores = createAsyncThunk(
   }
 );
 
-// 模拟API调用：获取公司认证列表
+// 模拟API调用：获取公司认证列表（仅超级管理员）
 export const fetchCompanyVerifications = createAsyncThunk(
   'stores/fetchCompanyVerifications',
-  async () => {
+  async (_, { rejectWithValue }) => {
     try {
+      // ✅ 检查用户角色：只有超级管理员才能访问
+      const userStr = localStorage.getItem('user');
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        if (user.role !== 'super_admin' && user.role !== 'superadmin') {
+          console.log('[Stores] 非超级管理员，跳过获取租户列表');
+          return [];
+        }
+      } else {
+        console.log('[Stores] 未登录，跳过获取租户列表');
+        return [];
+      }
+
       const response = await apiGet<CompanyVerification[] | { data: CompanyVerification[] }>('/stores/company-verifications');
       // 后端返回 { ok: true, data: [...] }，但 apiGet 会自动提取 data
       // 如果是数组，直接使用；如果是对象，提取 data 字段
       return Array.isArray(response) ? response : (response.data || []);
     } catch (error) {
       console.error('[Stores] Fetch company verifications error:', error);
+      // 静默失败，不影响其他功能
       return [];
     }
   }
@@ -84,6 +99,55 @@ export const deleteStore = createAsyncThunk(
     return storeId;
   }
 );
+
+// ==================== 租户公司主体（新接口，所有租户） ====================
+
+// 获取租户公司主体列表
+export const fetchTenantCompanies = createAsyncThunk(
+  'stores/fetchTenantCompanies',
+  async () => {
+    const response = await apiGet<TenantCompany[] | { data: TenantCompany[] }>('/tenant-companies');
+    return Array.isArray(response) ? response : (response.data || []);
+  }
+);
+
+// 添加公司主体
+export const addTenantCompany = createAsyncThunk(
+  'stores/addTenantCompany',
+  async (companyData: Omit<TenantCompany, 'id' | 'createdAt' | 'updatedAt'>) => {
+    const resp = await apiPost<{ id: string; data?: TenantCompany }>('/tenant-companies', companyData);
+    return resp;
+  }
+);
+
+// 更新公司主体
+export const updateTenantCompany = createAsyncThunk(
+  'stores/updateTenantCompany',
+  async (companyData: TenantCompany) => {
+    await apiPut(`/tenant-companies/${companyData.id}`, companyData);
+    return companyData;
+  }
+);
+
+// 删除公司主体
+export const deleteTenantCompany = createAsyncThunk(
+  'stores/deleteTenantCompany',
+  async (companyId: string) => {
+    await apiDelete(`/tenant-companies/${companyId}`);
+    return companyId;
+  }
+);
+
+// 设置默认公司主体
+export const setDefaultTenantCompany = createAsyncThunk(
+  'stores/setDefaultTenantCompany',
+  async (companyId: string) => {
+    await apiPut(`/tenant-companies/${companyId}/set-default`, {});
+    return companyId;
+  }
+);
+
+// ==================== 旧接口（保留，兼容性） ====================
 
 // 模拟API调用：添加公司认证
 export const addCompanyVerification = createAsyncThunk(
@@ -256,6 +320,84 @@ const storesSlice = createSlice({
       .addCase(deleteCompanyVerification.rejected, (state, action) => {
         state.loading = false;
         state.error = action.error.message || '删除公司认证失败';
+      })
+    
+    // ==================== 租户公司主体（新接口） ====================
+    
+    // 获取租户公司主体列表
+      .addCase(fetchTenantCompanies.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(fetchTenantCompanies.fulfilled, (state, action: PayloadAction<TenantCompany[]>) => {
+        state.loading = false;
+        state.tenantCompanies = action.payload;
+      })
+      .addCase(fetchTenantCompanies.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.error.message || '获取公司主体列表失败';
+      })
+    
+    // 添加公司主体
+      .addCase(addTenantCompany.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(addTenantCompany.fulfilled, (state) => {
+        state.loading = false;
+        // 重新获取列表
+      })
+      .addCase(addTenantCompany.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.error.message || '添加公司主体失败';
+      })
+    
+    // 更新公司主体
+      .addCase(updateTenantCompany.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(updateTenantCompany.fulfilled, (state, action: PayloadAction<TenantCompany>) => {
+        state.loading = false;
+        const index = state.tenantCompanies.findIndex(c => c.id === action.payload.id);
+        if (index !== -1) {
+          state.tenantCompanies[index] = action.payload;
+        }
+      })
+      .addCase(updateTenantCompany.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.error.message || '更新公司主体失败';
+      })
+    
+    // 删除公司主体
+      .addCase(deleteTenantCompany.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(deleteTenantCompany.fulfilled, (state, action: PayloadAction<string>) => {
+        state.loading = false;
+        state.tenantCompanies = state.tenantCompanies.filter(c => c.id !== action.payload);
+      })
+      .addCase(deleteTenantCompany.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.error.message || '删除公司主体失败';
+      })
+    
+    // 设置默认公司主体
+      .addCase(setDefaultTenantCompany.pending, (state) => {
+        state.loading = true;
+      })
+      .addCase(setDefaultTenantCompany.fulfilled, (state, action: PayloadAction<string>) => {
+        state.loading = false;
+        // 更新所有公司的默认状态
+        state.tenantCompanies = state.tenantCompanies.map(c => ({
+          ...c,
+          isDefault: c.id === action.payload
+        }));
+      })
+      .addCase(setDefaultTenantCompany.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.error.message || '设置默认公司失败';
       });
   }
 });
@@ -263,7 +405,9 @@ const storesSlice = createSlice({
 // 导出选择器
 export const selectStores = (state: { stores: StoresState }) => state.stores.stores;
 export const selectCompanyVerifications = (state: { stores: StoresState }) => state.stores.companyVerifications;
+export const selectTenantCompanies = (state: { stores: StoresState }) => state.stores.tenantCompanies;
 export const selectCompanyVerificationsLoading = (state: { stores: StoresState }) => state.stores.loading;
+export const selectTenantCompaniesLoading = (state: { stores: StoresState }) => state.stores.loading;
 export const selectStoresLoading = (state: { stores: StoresState }) => state.stores.loading;
 export const selectStoresError = (state: { stores: StoresState }) => state.stores.error;
 

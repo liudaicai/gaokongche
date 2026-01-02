@@ -2,10 +2,11 @@
  * 客户管理路由（增强版） - MySQL
  * 添加分页、搜索、统计等完整功能
  * 
- * 注意：采用一户一库模式，不需要租户隔离过滤
+ * ✅ 多租户支持：通过 tenantMiddleware 自动过滤 company_id
  */
 import express from 'express';
 import crypto from 'crypto';
+import { tenantMiddleware, setTenantId, buildWhereClause } from '../middleware/tenant.js';
 
 const toDto = (row) => ({
   id: String(row.id),
@@ -35,7 +36,7 @@ export default function buildCustomersRouterMySQL(pool) {
 
   // ==================== 客户列表（分页、搜索、过滤） ====================
   // GET /api/customers?page=1&pageSize=10&search=&type=&status=&creditLevel=
-  router.get('/', async (req, res) => {
+  router.get('/', tenantMiddleware, async (req, res) => {
     try {
       const page = Number(req.query.page) || 1;
       const pageSize = Number(req.query.pageSize) || 10;
@@ -45,39 +46,40 @@ export default function buildCustomersRouterMySQL(pool) {
       const status = req.query.status || '';
       const creditLevel = req.query.creditLevel || '';
       
-      // 一户一库，不需要租户过滤
-      let whereClause = 'WHERE 1=1';
-      const params = [];
+      // ✅ 多租户过滤：使用中间件注入的条件
+      const { where, params } = req.tenantFilter;
+      let whereClause = `WHERE ${where}`;
+      const queryParams = [...params];
       
       // 搜索条件（姓名、电话、地址、联系人）
       if (search) {
         whereClause += ' AND (name LIKE ? OR phone LIKE ? OR address LIKE ? OR contact LIKE ?)';
         const searchPattern = `%${search}%`;
-        params.push(searchPattern, searchPattern, searchPattern, searchPattern);
+        queryParams.push(searchPattern, searchPattern, searchPattern, searchPattern);
       }
       
       // 客户类型过滤
       if (customerType) {
         whereClause += ' AND customer_type = ?';
-        params.push(customerType);
+        queryParams.push(customerType);
       }
       
       // 状态过滤
       if (status) {
         whereClause += ' AND status = ?';
-        params.push(status);
+        queryParams.push(status);
       }
       
       // 信用等级过滤
       if (creditLevel) {
         whereClause += ' AND credit_level = ?';
-        params.push(creditLevel);
+        queryParams.push(creditLevel);
       }
       
       // 查询总数
       const [countRows] = await pool.query(
         `SELECT COUNT(*) as total FROM customers ${whereClause}`,
-        params
+        queryParams
       );
       const total = countRows[0]?.total || 0;
       
@@ -93,7 +95,7 @@ export default function buildCustomersRouterMySQL(pool) {
          ${whereClause}
          ORDER BY updated_at DESC, id DESC
          LIMIT ? OFFSET ?`,
-        [...params, pageSize, offset]
+        [...queryParams, pageSize, offset]
       );
       
       res.json({
@@ -108,26 +110,29 @@ export default function buildCustomersRouterMySQL(pool) {
       });
     } catch (err) {
       console.error('[Customers.MySQL] List error:', err);
-      res.status(500).json({ ok: false, error: err?.message || 'List error' });
+      res.status(500).json({ ok: false, error: err?.message || '获取客户列表失败' });
     }
   });
 
   // ==================== 客户统计 ====================
   // GET /api/customers/stats
-  router.get('/stats', async (req, res) => {
+  router.get('/stats', tenantMiddleware, async (req, res) => {
     try {
-      // 一户一库，不需要租户过滤
+      // ✅ 多租户过滤
+      const { where, params } = req.tenantFilter;
 
       // 总客户数
       const [totalRows] = await pool.query(
-        `SELECT COUNT(*) as count FROM customers`
+        `SELECT COUNT(*) as count FROM customers WHERE ${where}`,
+        params
       );
       const totalCount = totalRows[0]?.count || 0;
 
       // 活跃客户数
       const [activeRows] = await pool.query(
         `SELECT COUNT(*) as count FROM customers
-         WHERE status = 'active'`
+         WHERE ${where} AND status = 'active'`,
+        [...params, 'active']
       );
       const activeCount = activeRows[0]?.count || 0;
 
@@ -135,21 +140,27 @@ export default function buildCustomersRouterMySQL(pool) {
       const [typeRows] = await pool.query(
         `SELECT customer_type, COUNT(*) as count
          FROM customers
-         GROUP BY customer_type`
+         WHERE ${where}
+         GROUP BY customer_type`,
+        params
       );
 
       // 按信用等级统计
       const [creditRows] = await pool.query(
         `SELECT credit_level, COUNT(*) as count
          FROM customers
-         GROUP BY credit_level`
+         WHERE ${where}
+         GROUP BY credit_level`,
+        params
       );
 
       // 按状态统计
       const [statusRows] = await pool.query(
         `SELECT status, COUNT(*) as count
          FROM customers
-         GROUP BY status`
+         WHERE ${where}
+         GROUP BY status`,
+        params
       );
       
       res.json({
@@ -164,12 +175,12 @@ export default function buildCustomersRouterMySQL(pool) {
       });
     } catch (err) {
       console.error('[Customers.MySQL] Stats error:', err);
-      res.status(500).json({ ok: false, error: err?.message || 'Stats error' });
+      res.status(500).json({ ok: false, error: err?.message || '获取客户统计失败' });
     }
   });
 
   // ==================== 新增客户（增强版） ====================
-  router.post('/', async (req, res) => {
+  router.post('/', tenantMiddleware, async (req, res) => {
     const b = req.body || {};
     console.log('[Customers.MySQL] Creating customer with data:', b);
     
@@ -179,11 +190,11 @@ export default function buildCustomersRouterMySQL(pool) {
     const contact = (b.contact !== undefined ? String(b.contact) : '').trim();
     
     if (!name) {
-      return res.status(400).json({ ok: false, error: 'name required' });
+      return res.status(400).json({ ok: false, error: '客户名称不能为空' });
     }
     
-    // 不再检查 company_id（多租户已移除）
-    const companyId = null;
+    // ✅ 自动设置 company_id（通过中间件）
+    const companyId = req.tenantId;
     
     try {
       const mongoId = crypto.randomBytes(12).toString('hex');
@@ -212,52 +223,56 @@ export default function buildCustomersRouterMySQL(pool) {
       );
       const insertId = Number(r?.insertId || 0);
       if (!insertId) {
-        return res.status(500).json({ ok: false, error: 'Create failed' });
+        return res.status(500).json({ ok: false, error: '创建客户失败' });
       }
       console.log('[Customers.MySQL] Customer created with ID:', insertId);
       return res.json({ ok: true, id: insertId });
     } catch (err) {
       console.error('[Customers.MySQL] Create error:', err);
-      res.status(500).json({ ok: false, error: err?.message || 'Create error' });
+      res.status(500).json({ ok: false, error: err?.message || '创建客户失败' });
     }
   });
 
   // ==================== 获取单个客户详情（增强版） ====================
-  router.get('/:id', async (req, res) => {
+  router.get('/:id', tenantMiddleware, async (req, res) => {
     const idNum = Number(req.params.id);
     if (!Number.isFinite(idNum) || idNum <= 0) {
-      return res.status(400).json({ ok: false, error: 'Invalid customer id' });
+      return res.status(400).json({ ok: false, error: '客户ID无效' });
     }
     try {
-            // 一户一库，不需要租户过滤
+      // ✅ 多租户过滤：确保只能访问本公司的客户
+      const { where, params } = buildWhereClause(req, ['id = ?'], [idNum]);
+      
       const [rows] = await pool.query(`SELECT 
         id, mongo_id, name, contact, phone, address,
         customer_type, credit_level, business_manager_id, business_manager_name,
         settlement_method, tax_number, bank_account, bank_name,
         status, tags, notes,
         created_at, updated_at
-      FROM customers WHERE id = ? LIMIT 1`, [idNum]);
+      FROM customers WHERE ${where} LIMIT 1`, params);
+      
       const row = (rows || [])[0];
-      if (!row) return res.status(404).json({ ok: false, error: 'Customer not found' });
+      if (!row) return res.status(404).json({ ok: false, error: '客户不存在或无权访问' });
       return res.json({ ok: true, data: toDto(row) });
     } catch (err) {
       console.error('[Customers.MySQL] Get detail error:', err);
-      res.status(500).json({ ok: false, error: err?.message || 'Get detail error' });
+      res.status(500).json({ ok: false, error: err?.message || '获取客户详情失败' });
     }
   });
 
   // ==================== 更新客户（增强版） ====================
-  router.put('/:id', async (req, res) => {
+  router.put('/:id', tenantMiddleware, async (req, res) => {
     const idNum = Number(req.params.id);
     if (!Number.isFinite(idNum) || idNum <= 0) {
-      return res.status(400).json({ ok: false, error: 'Invalid customer id' });
+      return res.status(400).json({ ok: false, error: '客户ID无效' });
     }
     
     const b = req.body || {};
     console.log('[Customers.MySQL] Updating customer', idNum, 'with data:', b);
     
     try {
-      // 一户一库，不需要租户过滤
+      // ✅ 多租户过滤：确保只能更新本公司的客户
+      const { where, params: filterParams } = buildWhereClause(req, ['id = ?'], [idNum]);
       
       const name = String(b.name || '').trim();
       const phone = (b.phone !== undefined ? String(b.phone) : '').trim();
@@ -265,7 +280,7 @@ export default function buildCustomersRouterMySQL(pool) {
       const contact = (b.contact !== undefined ? String(b.contact) : '').trim();
       
       if (!name) {
-        return res.status(400).json({ ok: false, error: 'name required' });
+        return res.status(400).json({ ok: false, error: '客户名称不能为空' });
       }
       
       const [r] = await pool.query(
@@ -277,7 +292,7 @@ export default function buildCustomersRouterMySQL(pool) {
           bank_account = ?, bank_name = ?,
           status = ?, tags = ?, notes = ?,
           updated_at = NOW() 
-        WHERE id = ?`,
+        WHERE ${where}`,
         [
           name, phone || null, contact, address || null,
           b.type || b.customerType || 'enterprise',
@@ -291,41 +306,44 @@ export default function buildCustomersRouterMySQL(pool) {
           b.status || 'active',
           b.tags ? JSON.stringify(b.tags) : null,
           b.notes || null,
-          idNum
+          ...filterParams
         ]
       );
       if (Number(r?.affectedRows || 0) === 0) {
-        return res.status(404).json({ ok: false, error: 'Customer not found' });
+        return res.status(404).json({ ok: false, error: '客户不存在或无权访问' });
       }
       console.log('[Customers.MySQL] Customer updated with ID:', idNum);
       return res.json({ ok: true });
     } catch (err) {
       console.error('[Customers.MySQL] Update error:', err);
-      res.status(500).json({ ok: false, error: err?.message || 'Update error' });
+      res.status(500).json({ ok: false, error: err?.message || '更新客户失败' });
     }
   });
 
   // ==================== 删除客户 ====================
-  router.delete('/:id', async (req, res) => {
+  router.delete('/:id', tenantMiddleware, async (req, res) => {
     const idNum = Number(req.params.id);
     if (!Number.isFinite(idNum) || idNum <= 0) {
-      return res.status(400).json({ ok: false, error: 'Invalid customer id' });
+      return res.status(400).json({ ok: false, error: '客户ID无效' });
     }
     try {
-      // 一户一库，不需要租户过滤
+      // ✅ 多租户过滤：确保只能删除本公司的客户
+      const { where, params: filterParams } = buildWhereClause(req, ['id = ?'], [idNum]);
       
       // 引用检查：如存在订单引用该客户，阻止删除并返回冲突
+      // ✅ 多租户：只检查当前公司的订单
       try {
+        const { where: orderTenantWhere, params: orderTenantParams } = req.tenantFilter;
         const [cntRows] = await pool.query(
-          `SELECT COUNT(*) AS cnt FROM orders 
-           WHERE (customer_id = ? OR lessor_id = ?)`,
-          [idNum, idNum]
+          `SELECT COUNT(*) AS cnt FROM orders
+           WHERE (customer_id = ? OR lessor_id = ?) AND ${orderTenantWhere}`,
+          [idNum, idNum, ...orderTenantParams]
         );
         const refCount = Number((cntRows || [{}])[0]?.cnt || 0);
         if (refCount > 0) {
           console.log(`[Customers.MySQL] Cannot delete customer ${idNum} - has ${refCount} related orders`);
-          return res.status(409).json({ 
-            ok: false, 
+          return res.status(409).json({
+            ok: false,
             error: `无法删除该客户，因为存在 ${refCount} 个关联订单。请先删除或修改相关订单后再试。`,
             code: 'CUSTOMER_HAS_RELATED_ORDERS',
             relatedOrderCount: refCount
@@ -336,16 +354,16 @@ export default function buildCustomersRouterMySQL(pool) {
       }
 
       const [r] = await pool.query(
-        `DELETE FROM customers WHERE id = ?`, 
-        [idNum]
+        `DELETE FROM customers WHERE ${where}`, 
+        filterParams
       );
       if (Number(r?.affectedRows || 0) === 0) {
-        return res.status(404).json({ ok: false, error: 'Customer not found' });
+        return res.status(404).json({ ok: false, error: '客户不存在或无权访问' });
       }
       return res.json({ ok: true });
     } catch (err) {
       console.error('[Customers.MySQL] Delete error:', err);
-      res.status(500).json({ ok: false, error: err?.message || 'Delete error' });
+      res.status(500).json({ ok: false, error: err?.message || '删除客户失败' });
     }
   });
 

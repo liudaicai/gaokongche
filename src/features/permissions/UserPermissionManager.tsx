@@ -5,7 +5,7 @@ import {
   Button,
   Space,
   Modal,
-  message,
+  App,
   Tag,
   Select,
   Switch,
@@ -32,6 +32,7 @@ interface UserWithPermission extends User {
 }
 
 const UserPermissionManager: React.FC = () => {
+  const { message } = App.useApp();
   const [users, setUsers] = useState<UserWithPermission[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [loading, setLoading] = useState(false);
@@ -49,18 +50,27 @@ const UserPermissionManager: React.FC = () => {
     try {
       setLoading(true);
       // 获取用户列表
-      const usersResponse = await apiClient.get('/api/users');
+      const usersResponse = await apiClient.get('/users');
+      
+      console.log('[UserPermissionManager] API 响应:', usersResponse.data);
+      
       if (!usersResponse.data.ok) {
-        throw new Error('获取用户列表失败');
+        throw new Error(usersResponse.data.error || '获取用户列表失败');
       }
 
       const usersList = usersResponse.data.data;
+      
+      // 验证数据格式
+      if (!Array.isArray(usersList)) {
+        console.error('[UserPermissionManager] usersList 不是数组:', usersList);
+        throw new Error('用户列表数据格式错误');
+      }
 
       // 为每个用户获取权限信息
       const usersWithPermissions = await Promise.all(
         usersList.map(async (user: User) => {
           try {
-            const permResponse = await apiClient.get(`/api/permissions/users/${user.id}`);
+            const permResponse = await apiClient.get(`/permissions/users/${user.id}`);
             const userPerm = permResponse.data.data;
             
             return {
@@ -91,7 +101,7 @@ const UserPermissionManager: React.FC = () => {
 
   const loadPermissions = async () => {
     try {
-      const response = await apiClient.get('/api/permissions/definitions');
+      const response = await apiClient.get('/permissions/definitions');
       if (response.data.ok) {
         setPermissions(response.data.data);
       }
@@ -105,14 +115,14 @@ const UserPermissionManager: React.FC = () => {
       setCurrentUser(user);
       
       // 获取用户当前权限
-      const response = await apiClient.get(`/api/permissions/users/${user.id}`);
+      const response = await apiClient.get(`/permissions/users/${user.id}`);
       if (response.data.ok && response.data.data) {
         setSelectedPermissions(response.data.data.permissionIds || []);
         setIsOverride(response.data.data.isOverride || false);
       } else {
         // 如果没有个人权限，获取角色权限作为默认值
         const effectiveResponse = await apiClient.get(
-          `/api/permissions/users/${user.id}/effective`
+          `/permissions/users/${user.id}/effective`
         );
         if (effectiveResponse.data.ok) {
           setSelectedPermissions(effectiveResponse.data.data.permissionIds || []);
@@ -128,7 +138,7 @@ const UserPermissionManager: React.FC = () => {
 
   const handleDeletePermissions = async (userId: number) => {
     try {
-      const response = await apiClient.delete(`/api/permissions/users/${userId}`);
+      const response = await apiClient.delete(`/permissions/users/${userId}`);
       if (response.data.ok) {
         message.success('已删除个人权限设置，恢复使用角色权限');
         loadData();
@@ -144,7 +154,7 @@ const UserPermissionManager: React.FC = () => {
     if (!currentUser) return;
 
     const response = await apiClient.post(
-      `/api/permissions/users/${currentUser.id}`,
+      `/permissions/users/${currentUser.id}`,
       {
         permissionIds: checkedKeys,
         isOverride,
@@ -294,7 +304,7 @@ const UserPermissionManager: React.FC = () => {
         onCancel={() => setPermissionModalVisible(false)}
         footer={null}
         width={900}
-        bodyStyle={{ height: '70vh', padding: 0 }}
+        styles={{ body: { height: '70vh', padding: 0 } }}
       >
         <div style={{ padding: 16, borderBottom: '1px solid #f0f0f0' }}>
           <Space align="center">

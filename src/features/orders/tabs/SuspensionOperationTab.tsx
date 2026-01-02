@@ -310,8 +310,12 @@ const SuspensionOperationTab: React.FC<Props> = ({ order, tabKey }) => {
           </Row>
           <Row gutter={16}>
             <Col span={24}>
-              <Form.Item name="reason" label="原因备注">
-                <Input.TextArea rows={3} placeholder="填写详细原因（选填）" />
+              <Form.Item 
+                name="reason" 
+                label="报停原因" 
+                rules={[{ required: true, message: '请填写报停原因' }]}
+              >
+                <Input.TextArea rows={3} placeholder="请详细说明报停原因" maxLength={500} showCount />
               </Form.Item>
             </Col>
           </Row>

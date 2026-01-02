@@ -53,8 +53,10 @@ const CustomerList: React.FC = () => {
       onOk() {
         dispatch(deleteCustomer(id) as any).then(() => {
           message.success('客户删除成功');
-        }).catch(() => {
-          message.error('客户删除失败');
+        }).catch((err: any) => {
+          // 显示具体的错误原因
+          const errorMsg = err?.message || '客户删除失败';
+          message.error(errorMsg);
         });
       }
     });
@@ -226,11 +228,11 @@ const CustomerList: React.FC = () => {
             if (editCustomer) {
               dispatch(updateCustomer(customerData as Customer) as any)
                 .then(() => message.success('客户更新成功'))
-                .catch(() => message.error('客户更新失败'));
+                .catch((err: any) => message.error(err?.message || '客户更新失败'));
             } else {
               dispatch(addCustomer(customerData as Customer) as any)
                 .then(() => message.success('客户添加成功'))
-                .catch(() => message.error('客户添加失败'));
+                .catch((err: any) => message.error(err?.message || '客户添加失败'));
             }
           }}
         />

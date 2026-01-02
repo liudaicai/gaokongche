@@ -3,11 +3,12 @@
  * 合同管理 API路由
  */
 import express from 'express';
+import { tenantMiddleware } from '../middleware/tenant.js';
 export default function buildContractsRouter(pool) {
   const router = express.Router();
   
   // 生成合同记录
-  router.post('/generate', async (req, res) => {
+  router.post('/generate', tenantMiddleware, async (req, res) => {
     try {
       const { orderId, templateId, contractNumber } = req.body;
       const userId = req.user?.id;
@@ -47,7 +48,7 @@ export default function buildContractsRouter(pool) {
   });
   
   // 获取订单的合同列表
-  router.get('/order/:orderId', async (req, res) => {
+  router.get('/order/:orderId', tenantMiddleware, async (req, res) => {
     try {
       const { orderId } = req.params;
       // 一户一库，不需要租户过滤
@@ -73,7 +74,7 @@ export default function buildContractsRouter(pool) {
   });
   
   // 获取合同详情
-  router.get('/:id', async (req, res) => {
+  router.get('/:id', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
       // 一户一库，不需要租户过滤
@@ -102,7 +103,7 @@ export default function buildContractsRouter(pool) {
   });
   
   // 更新合同状态
-  router.put('/:id/status', async (req, res) => {
+  router.put('/:id/status', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
       const { status, signedByCustomer, signedByCompany } = req.body;
@@ -137,7 +138,7 @@ export default function buildContractsRouter(pool) {
   });
   
   // 删除合同
-  router.delete('/:id', async (req, res) => {
+  router.delete('/:id', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
       // 一户一库，不需要租户过滤

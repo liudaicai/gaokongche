@@ -150,9 +150,13 @@ async function request<T>(
   const url = `${API_BASE}${path}`;
   const authHeaders = getAuthHeaders();
   
+  // 支持租户切换（仅超级管理员）
+  const tenantOverride = sessionStorage.getItem('tenant-override');
+  
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     ...authHeaders,
+    ...(tenantOverride && tenantOverride !== 'null' ? { 'X-Tenant-Override': tenantOverride } : {}),
   };
 
   try {
@@ -298,7 +302,14 @@ export async function apiUpload<T>(
   formData: FormData
 ): Promise<T> {
   const url = `${API_BASE}${path}`;
-  const headers = getAuthHeaders();
+  const authHeaders = getAuthHeaders();
+  
+  // 支持租户切换（仅超级管理员）
+  const tenantOverride = sessionStorage.getItem('tenant-override');
+  const headers = {
+    ...authHeaders,
+    ...(tenantOverride && tenantOverride !== 'null' ? { 'X-Tenant-Override': tenantOverride } : {}),
+  };
 
   try {
     const response = await fetch(url, {

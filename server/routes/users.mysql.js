@@ -1,9 +1,14 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
-// ✅ 多租户已移除 (2025-12-21)
+import { tenantMiddleware, setTenantId, buildWhereClause, sharedResourceMiddleware } from '../middleware/tenant.js';
 
-// 单租户模式：角色检查已禁用，所有用户平等
-const requireRole = (...roles) => (req, res, next) => next();
+// 角色检查中间件
+const requireRole = (...roles) => (req, res, next) => {
+  if (!req.user || !roles.includes(req.user.role)) {
+    return res.status(403).json({ ok: false, error: '权限不足' });
+  }
+  next();
+};
 
 /**
  * 密码强度验证
@@ -37,7 +42,7 @@ export default function buildUsersRouterMySQL(pool) {
   const router = express.Router();
 
   // 获取用户列表（分页、搜索）
-  router.get('/', async (req, res) => {
+  router.get('/', tenantMiddleware, async (req, res) => {
     try {
       const page = Number(req.query.page) || 1;
       const pageSize = Number(req.query.pageSize) || 10;
@@ -45,12 +50,10 @@ export default function buildUsersRouterMySQL(pool) {
 
       const offset = (page - 1) * pageSize;
 
-      // 构建查询条件
-      let whereConditions = [];
-      let params = [];
-
-      // 不再检查 company_id（多租户已移除）
-      // 允许查看所有用户
+      // ✅ 多租户过滤
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+      let whereConditions = [tenantWhere];
+      let params = [...tenantParams];
 
       // 搜索条件
       if (search) {
@@ -59,22 +62,22 @@ export default function buildUsersRouterMySQL(pool) {
         params.push(searchPattern, searchPattern, searchPattern);
       }
 
-      const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
+      const whereClause = 'WHERE u.' + whereConditions.join(' AND u.');
 
       // 查询用户列表
       const [rows] = await pool.query(
         `SELECT u.id, u.username, u.role, u.name, u.email, u.phone, u.company_id,
                 u.is_active, u.is_locked, u.created_at, u.updated_at,
                 u.department_id, u.position_id, u.superior_id,
-                c.name AS company_name,
+                cv.company_name AS company_name,
                 d.name AS department_name,
                 p.name AS position_name,
                 p.level AS position_level,
                 sup.name AS superior_name
          FROM users u
-         LEFT JOIN companies c ON c.id = u.company_id
-         LEFT JOIN departments d ON d.id = u.department_id AND d.is_deleted = 0
-         LEFT JOIN positions p ON p.id = u.position_id AND p.is_deleted = 0
+         LEFT JOIN company_verifications cv ON cv.id = u.company_id
+         LEFT JOIN departments d ON d.id = u.department_id
+         LEFT JOIN positions p ON p.id = u.position_id
          LEFT JOIN users sup ON sup.id = u.superior_id
          ${whereClause}
          ORDER BY u.created_at DESC
@@ -127,26 +130,28 @@ export default function buildUsersRouterMySQL(pool) {
   });
 
   // 获取单个用户详情
-  router.get('/:id', async (req, res) => {
+  router.get('/:id', tenantMiddleware, async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id) || id <= 0) {
       return res.status(400).json({ ok: false, error: 'Invalid user id' });
     }
 
     try {
-      // 一户一库，不需要租户过滤
+      // ✅ 多租户过滤
+      const { where, params } = buildWhereClause(req, ['u.id = ?'], [id]);
+      
       const [rows] = await pool.query(
         `SELECT u.id, u.username, u.role, u.name, u.email, u.phone, u.company_id,
                 u.is_active, u.is_locked, u.created_at, u.updated_at,
-                c.name AS company_name
+                cv.company_name AS company_name
          FROM users u
-         LEFT JOIN companies c ON c.id = u.company_id
-         WHERE u.id = ? AND ${tenantFilter.where}`,
-        [id]
+         LEFT JOIN company_verifications cv ON cv.id = u.company_id
+         WHERE ${where}`,
+        params
       );
 
       if (!rows || rows.length === 0) {
-        return res.status(404).json({ ok: false, error: 'User not found' });
+        return res.status(404).json({ ok: false, error: '用户不存在或无权访问' });
       }
 
       const user = rows[0];
@@ -174,7 +179,7 @@ export default function buildUsersRouterMySQL(pool) {
   });
 
   // 创建用户（仅管理员）
-  router.post('/', requireRole('superadmin', 'admin'), async (req, res) => {
+  router.post('/', tenantMiddleware, requireRole('superadmin', 'admin', 'super_admin', 'manager'), async (req, res) => {
     try {
       const { username, password, role, name, email, phone, company_id } = req.body;
 
@@ -188,8 +193,9 @@ export default function buildUsersRouterMySQL(pool) {
         return res.status(400).json({ ok: false, error: passwordCheck.message });
       }
 
-      // 不再检查 company_id（多租户已移除）
-      const finalCompanyId = null;
+      // ✅ 多租户：自动设置 company_id
+      // 如果是超级管理员创建用户，可以指定company_id；否则使用当前用户的company_id
+      const finalCompanyId = req.user.role === 'super_admin' ? (company_id || req.tenantId) : req.tenantId;
 
       // 检查用户名是否已存在
       const [existing] = await pool.query(

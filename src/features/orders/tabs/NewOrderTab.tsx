@@ -6,7 +6,7 @@ import type { AppDispatch } from '../../../app/store';
 import { addOrder, fetchOrders } from '../ordersSlice';
 import { OrderFormData, OrderEquipmentItem } from '../types';
 import { useTabs } from '../../common/TabsContext';
-import { fetchCompanyVerifications, selectCompanyVerifications, selectCompanyVerificationsLoading } from '../../stores/storesSlice';
+import { fetchTenantCompanies, selectTenantCompanies, selectTenantCompaniesLoading } from '../../stores/storesSlice';
 import { fetchEmployees, selectEmployees, selectEmployeesLoading } from '../../employees/employeesSlice';
 import { selectEquipmentList, fetchEquipmentsStart, fetchEquipmentsSuccess, fetchEquipmentsFailure, Equipment } from '../../equipment/equipmentslice';
 import { fetchCustomers } from '../../customers/customerSlice';
@@ -16,6 +16,8 @@ import CustomerPickerModal from '../../customers/CustomerPickerModal';
 import dayjs from 'dayjs';
 import { apiGet } from '../../../api/client';
 import { calculateOrderEstimatedAmount } from '../pricing';
+import { checkBlacklist } from '../../blacklist/blacklistSlice';
+import type { BlacklistRecord } from '../../blacklist/types';
 
 const { TextArea } = Input;
 const { Option } = Select;
@@ -45,12 +47,12 @@ const NewOrderTab: React.FC<NewOrderTabProps> = ({ tabKey }) => {
    const { closeTab } = useTabs();
    const isUpdatingRef = useRef(false);
 
-   const companyVerifications = useSelector(selectCompanyVerifications);
+   const tenantCompanies = useSelector(selectTenantCompanies);
    const employees = useSelector(selectEmployees);
    const equipmentList = useSelector(selectEquipmentList);
 
    const safeEmployees = Array.isArray(employees) ? employees : [];
-   const safeCompanyVerifications = Array.isArray(companyVerifications) ? companyVerifications : [];
+   const safeTenantCompanies = Array.isArray(tenantCompanies) ? tenantCompanies : [];
 
    const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
    const [selectedCustomer, setSelectedCustomer] = useState<any | null>(null);
@@ -59,7 +61,7 @@ const NewOrderTab: React.FC<NewOrderTabProps> = ({ tabKey }) => {
 
    useEffect(() => {
       dispatch(fetchEmployees({ page: 1, pageSize: 100 }));
-      dispatch(fetchCompanyVerifications());
+      dispatch(fetchTenantCompanies());
       dispatch(fetchCustomers());
 
       const fetchModels = async () => {
@@ -178,7 +180,7 @@ const NewOrderTab: React.FC<NewOrderTabProps> = ({ tabKey }) => {
                         <Col span={12}>
                            <Form.Item name="lessorId" label="出租方主体" rules={[{ required: true }]}>
                               <Select placeholder="选择出租方" allowClear size="large">
-                                 {safeCompanyVerifications.map(c => <Option key={c.id} value={c.id}>{c.companyName}</Option>)}
+                                 {safeTenantCompanies.filter(c => c.status === 'active').map(c => <Option key={c.id} value={c.id}>{c.companyName}</Option>)}
                               </Select>
                            </Form.Item>
                         </Col>
@@ -274,7 +276,7 @@ const NewOrderTab: React.FC<NewOrderTabProps> = ({ tabKey }) => {
                            });
                         }}>添加设备</Button>
                      }
-                     bodyStyle={{ padding: '16px', background: '#fafafa', minHeight: 400 }}
+                     styles={{ body: { padding: '16px', background: '#fafafa', minHeight: 400 } }}
                   >
                      <Form.List name="equipmentItems">
                         {(fields, { remove }) => (
@@ -301,11 +303,11 @@ const NewOrderTab: React.FC<NewOrderTabProps> = ({ tabKey }) => {
                                  const availableHeights = getAvailableHeights(item.equipmentCategory, item.equipmentType);
 
                                  return (
-                                    <div key={key} style={{ background: '#fff', padding: '8px', marginBottom: 8, borderRadius: 4, border: '1px solid #f0f0f0' }}>
+                                    <div key={key} style={{ background: '#fff', padding: '12px', marginBottom: 12, borderRadius: 4, border: '1px solid #f0f0f0' }}>
                                        <Row gutter={8} align="middle">
                                           <Col span={2}>
                                              <Form.Item {...restField} name={[name, 'equipmentCategory']} rules={[{ required: true }]} style={{ marginBottom: 0 }}>
-                                                <Select size="small" placeholder="类别" options={EQUIPMENT_CATEGORIES.map(c => ({ label: c, value: c }))} onChange={() => {
+                                                <Select placeholder="类别" options={EQUIPMENT_CATEGORIES.map(c => ({ label: c, value: c }))} onChange={() => {
                                                    const items = form.getFieldValue('equipmentItems');
                                                    items[name].equipmentType = undefined;
                                                    items[name].height = undefined;
@@ -315,7 +317,7 @@ const NewOrderTab: React.FC<NewOrderTabProps> = ({ tabKey }) => {
                                           </Col>
                                           <Col span={2}>
                                              <Form.Item {...restField} name={[name, 'equipmentType']} rules={[{ required: true }]} style={{ marginBottom: 0 }}>
-                                                <Select size="small" placeholder="类型" options={availableTypes.map(t => ({ label: t, value: t }))} disabled={!item.equipmentCategory} onChange={() => {
+                                                <Select placeholder="类型" options={availableTypes.map(t => ({ label: t, value: t }))} disabled={!item.equipmentCategory} onChange={() => {
                                                    const items = form.getFieldValue('equipmentItems');
                                                    items[name].height = undefined;
                                                    form.setFieldsValue({ equipmentItems: items });
@@ -324,47 +326,47 @@ const NewOrderTab: React.FC<NewOrderTabProps> = ({ tabKey }) => {
                                           </Col>
                                           <Col span={2}>
                                              <Form.Item {...restField} name={[name, 'height']} rules={[{ required: true }]} style={{ marginBottom: 0 }}>
-                                                <Select size="small" placeholder="高度" options={availableHeights.map(h => ({ label: h + '米', value: h }))} disabled={!item.equipmentType} />
+                                                <Select placeholder="高度" options={availableHeights.map(h => ({ label: h + '米', value: h }))} disabled={!item.equipmentType} />
                                              </Form.Item>
                                           </Col>
                                           <Col span={2}>
                                              <Form.Item {...restField} name={[name, 'quantity']} rules={[{ required: true }]} style={{ marginBottom: 0 }}>
-                                                <InputNumber size="small" min={1} placeholder="数量" style={{ width: '100%' }} />
+                                                <InputNumber min={1} placeholder="数量" style={{ width: '100%' }} />
                                              </Form.Item>
                                           </Col>
                                           <Col span={3}>
                                              <Form.Item {...restField} name={[name, 'scheduledEntryDate']} style={{ marginBottom: 0 }}>
-                                                <DatePicker size="small" placeholder="进场" style={{ width: '100%' }} onChange={() => handleDateFieldChange(name, 'entry')} />
+                                                <DatePicker placeholder="进场" style={{ width: '100%' }} onChange={() => handleDateFieldChange(name, 'entry')} />
                                              </Form.Item>
                                           </Col>
                                           <Col span={2}>
                                              <Form.Item {...restField} name={[name, 'rentalPeriod']} style={{ marginBottom: 0 }}>
-                                                <InputNumber size="small" min={1} placeholder="租期" style={{ width: '100%' }} onBlur={() => handleDateFieldChange(name, 'rentalPeriod')} />
+                                                <InputNumber min={1} placeholder="租期" style={{ width: '100%' }} onBlur={() => handleDateFieldChange(name, 'rentalPeriod')} />
                                              </Form.Item>
                                           </Col>
                                           <Col span={2}>
                                              <Form.Item {...restField} name={[name, 'dailyRate']} style={{ marginBottom: 0 }}>
-                                                <InputNumber size="small" min={0} placeholder="日租" style={{ width: '100%' }} />
+                                                <InputNumber min={0} placeholder="日租" style={{ width: '100%' }} />
                                              </Form.Item>
                                           </Col>
                                           <Col span={2}>
                                              <Form.Item {...restField} name={[name, 'monthlyRate']} style={{ marginBottom: 0 }}>
-                                                <InputNumber size="small" min={0} placeholder="月租" style={{ width: '100%' }} />
+                                                <InputNumber min={0} placeholder="月租" style={{ width: '100%' }} />
                                              </Form.Item>
                                           </Col>
                                           <Col span={2}>
                                              <Form.Item {...restField} name={[name, 'shippingFee']} style={{ marginBottom: 0 }}>
-                                                <InputNumber size="small" min={0} placeholder="运费" style={{ width: '100%' }} />
+                                                <InputNumber min={0} placeholder="运费" style={{ width: '100%' }} />
                                              </Form.Item>
                                           </Col>
                                           <Col span={2}>
                                              <Form.Item {...restField} name={[name, 'deposit']} style={{ marginBottom: 0 }}>
-                                                <InputNumber size="small" min={0} placeholder="押金" style={{ width: '100%' }} />
+                                                <InputNumber min={0} placeholder="押金" style={{ width: '100%' }} />
                                              </Form.Item>
                                           </Col>
                                           <Col span={2}>
                                              <Form.Item {...restField} name={[name, 'modificationFee']} style={{ marginBottom: 0 }}>
-                                                <InputNumber size="small" min={0} placeholder="改装" style={{ width: '100%' }} />
+                                                <InputNumber min={0} placeholder="改装" style={{ width: '100%' }} />
                                              </Form.Item>
                                           </Col>
                                           <Col span={1} style={{ textAlign: 'center' }}>
@@ -397,10 +399,149 @@ const NewOrderTab: React.FC<NewOrderTabProps> = ({ tabKey }) => {
             <CustomerPickerModal
                visible={customerPickerOpen}
                onCancel={() => setCustomerPickerOpen(false)}
-               onSelect={(customer: any) => {
+               onSelect={async (customer: any) => {
+                  // 先设置客户
                   setSelectedCustomer(customer);
                   form.setFieldsValue({ customerId: customer.id || customer._id });
                   setCustomerPickerOpen(false);
+                  
+                  // 检查黑名单
+                  try {
+                     const customerName = customer.name || customer.companyName;
+                     const customerPhone = customer.phone;
+                     const customerIdCard = customer.idCardNumber;
+                     
+                     const result = await dispatch(checkBlacklist({
+                        customerName,
+                        customerPhone,
+                        customerIdCard,
+                        context: '新增订单'
+                     })).unwrap();
+                     
+                     if (result.isBlacklisted && result.records.length > 0) {
+                        const blacklistRecords = result.records;
+                        
+                        const getSeverityColor = (severity: string) => {
+                           switch (severity) {
+                              case 'critical': return '#d32f2f';
+                              case 'high': return '#f44336';
+                              case 'medium': return '#ff9800';
+                              case 'low': return '#2196f3';
+                              default: return '#666';
+                           }
+                        };
+                        
+                        const getSeverityText = (severity: string) => {
+                           switch (severity) {
+                              case 'critical': return '极高风险';
+                              case 'high': return '高风险';
+                              case 'medium': return '中风险';
+                              case 'low': return '低风险';
+                              default: return '未知';
+                           }
+                        };
+                        
+                        // 显示黑名单警告
+                        Modal.confirm({
+                           title: '⚠️ 黑名单警告',
+                           width: 650,
+                           okText: '继续使用',
+                           cancelText: '取消选择',
+                           onOk: () => {
+                              // 用户选择继续使用该客户
+                              console.log('用户选择继续使用黑名单客户');
+                           },
+                           onCancel: () => {
+                              // 用户取消，清除已选择的客户
+                              setSelectedCustomer(null);
+                              form.setFieldsValue({ customerId: undefined });
+                           },
+                           content: (
+                              <div>
+                                 <div style={{ 
+                                    padding: 12, 
+                                    background: '#fff2e8', 
+                                    border: '1px solid #ffbb96',
+                                    borderRadius: 4,
+                                    marginBottom: 16
+                                 }}>
+                                    <strong style={{ color: '#fa541c' }}>
+                                       该客户已在黑名单中，请谨慎处理！
+                                    </strong>
+                                 </div>
+                                 
+                                 {blacklistRecords.map((record: BlacklistRecord) => (
+                                    <div 
+                                       key={record.id} 
+                                       style={{ 
+                                          marginBottom: 12, 
+                                          padding: 12, 
+                                          background: '#fff3f3', 
+                                          border: '1px solid #ffccc7',
+                                          borderRadius: 4 
+                                       }}
+                                    >
+                                       <div style={{ marginBottom: 8 }}>
+                                          <span style={{ 
+                                             fontWeight: 'bold', 
+                                             color: getSeverityColor(record.severity),
+                                             fontSize: 14
+                                          }}>
+                                             风险等级: {getSeverityText(record.severity)}
+                                          </span>
+                                       </div>
+                                       <div style={{ marginBottom: 4, fontSize: 13 }}>
+                                          <strong>客户名称：</strong>{record.customerName}
+                                       </div>
+                                       {record.customerPhone && (
+                                          <div style={{ marginBottom: 4, fontSize: 13 }}>
+                                             <strong>电话：</strong>{record.customerPhone}
+                                          </div>
+                                       )}
+                                       <div style={{ marginBottom: 4, fontSize: 13 }}>
+                                          <strong>加入原因：</strong>
+                                          <div style={{ 
+                                             marginTop: 4, 
+                                             padding: 8, 
+                                             background: '#fff', 
+                                             borderRadius: 2 
+                                          }}>
+                                             {record.reason}
+                                          </div>
+                                       </div>
+                                       <div style={{ fontSize: 12, color: '#666', marginTop: 8 }}>
+                                          <strong>上传者：</strong>{record.uploaderName} | 
+                                          <strong> 上传时间：</strong>{new Date(record.uploadTime).toLocaleString()}
+                                       </div>
+                                    </div>
+                                 ))}
+                                 
+                                 <div style={{ 
+                                    marginTop: 16, 
+                                    padding: 12, 
+                                    background: '#f6f8fa', 
+                                    borderRadius: 4,
+                                    fontSize: 12,
+                                    color: '#666'
+                                 }}>
+                                    <p style={{ margin: 0 }}>
+                                       💡 <strong>温馨提示：</strong>
+                                    </p>
+                                    <ul style={{ margin: '8px 0 0 20px', paddingLeft: 0 }}>
+                                       <li>建议核实客户身份和信用情况</li>
+                                       <li>建议提高押金和预付款比例</li>
+                                       <li>建议要求客户提供额外担保</li>
+                                       <li>如有疑问，请咨询管理层</li>
+                                    </ul>
+                                 </div>
+                              </div>
+                           ),
+                        });
+                     }
+                  } catch (error: any) {
+                     console.error('黑名单检查失败:', error);
+                     // 检查失败不影响继续操作，只记录日志
+                  }
                }}
             />
          </Form>

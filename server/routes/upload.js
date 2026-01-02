@@ -6,7 +6,8 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const uploadsDir = path.join(__dirname, '..', 'uploads');
+// 使用项目根目录（server 的上级目录）
+const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
 
 // 确保上传目录存在
 try {
@@ -47,6 +48,25 @@ export default function buildUploadRouter() {
 
   // 单文件上传（Upload.Dragger 默认每次上传一个文件）
   router.post('/', upload.single('file'), async (req, res) => {
+    try {
+      const f = req.file;
+      if (!f) return res.status(400).json({ ok: false, error: 'No file uploaded' });
+      const file = {
+        name: f.originalname,
+        path: f.path,
+        url: `/uploads/${path.basename(f.path)}`,
+        size: f.size,
+        type: f.mimetype,
+      };
+      res.json({ ok: true, file });
+    } catch (err) {
+      console.error('[Upload] Error:', err);
+      res.status(500).json({ ok: false, error: err.message || 'Upload error' });
+    }
+  });
+
+  // 兼容旧路径 /image
+  router.post('/image', upload.single('file'), async (req, res) => {
     try {
       const f = req.file;
       if (!f) return res.status(400).json({ ok: false, error: 'No file uploaded' });

@@ -1800,8 +1800,19 @@ const OrderDetailTab: React.FC<OrderDetailTabProps> = ({ orderId, tabKey, initia
                     </Tooltip>
                   ) },
                   { title: '对账状态', dataIndex: 'status', key: 'status', render: (s: string) => (<Tag color={statusColor(s)}>{s || '待对账'}</Tag>) },
-                  { title: '操作', key: 'op', render: (_: any, r: any) => {
+                  { title: '操作', key: 'op', render: (_: any, r: any, index: number) => {
                     const isReconciled = r.status === '已对账';
+                    
+                    // ✅ 判断是否为最新的结算单（按结算日期降序，取第一个）
+                    const allSettlements = order.settlements || [];
+                    const sortedSettlements = [...allSettlements].sort((a: any, b: any) => {
+                      const dateA = a.settlementDate || a.createdAt || '1900-01-01';
+                      const dateB = b.settlementDate || b.createdAt || '1900-01-01';
+                      return new Date(dateB).getTime() - new Date(dateA).getTime();
+                    });
+                    const latestSettlementId = sortedSettlements[0]?.id;
+                    const isLatest = r.id === latestSettlementId;
+                    
                     const menuItems = [
                       {
                         key: 'edit',
@@ -1854,36 +1865,46 @@ const OrderDetailTab: React.FC<OrderDetailTabProps> = ({ orderId, tabKey, initia
                           handleExportSettlement(r);
                         }
                       },
-                      {
-                        type: 'divider' as const
-                      },
-                      {
-                        key: 'delete',
-                        icon: <DeleteOutlined />,
-                        label: '删除',
-                        danger: true,
-                        onClick: () => {
-                          Modal.confirm({
-                            title: '确认删除结算单？',
-                            content: `确定要删除结算单 ${r.settlementNumber || ''} 吗？此操作不可恢复。`,
-                            okText: '删除',
-                            okType: 'danger',
-                            cancelText: '取消',
-                            onOk: async () => {
-                              try {
-                                await dispatch(deleteSettlement({
-                                  orderId,
-                                  settlementId: r.id
-                                })).unwrap();
-                                message.success('删除成功');
-                                dispatch(fetchOrderById(orderId));
-                              } catch (e: any) {
-                                message.error(e?.message || '删除失败');
+                      // 只在最新的结算单上显示删除选项
+                      ...(isLatest ? [
+                        {
+                          type: 'divider' as const
+                        },
+                        {
+                          key: 'delete',
+                          icon: <DeleteOutlined />,
+                          label: '删除（最新）',
+                          danger: true,
+                          onClick: () => {
+                            Modal.confirm({
+                              title: '确认删除最新结算单？',
+                              content: (
+                                <div>
+                                  <p>确定要删除结算单 <strong>{r.settlementNumber || ''}</strong> 吗？</p>
+                                  <p style={{ color: '#ff4d4f', marginTop: 8 }}>
+                                    ⚠️ 此操作不可恢复。系统仅允许删除最新的结算单，以确保数据一致性。
+                                  </p>
+                                </div>
+                              ),
+                              okText: '删除',
+                              okType: 'danger',
+                              cancelText: '取消',
+                              onOk: async () => {
+                                try {
+                                  await dispatch(deleteSettlement({
+                                    orderId,
+                                    settlementId: r.id
+                                  })).unwrap();
+                                  message.success('删除成功');
+                                  dispatch(fetchOrderById(orderId));
+                                } catch (e: any) {
+                                  message.error(e?.message || '删除失败', 6);
+                                }
                               }
-                            }
-                          });
+                            });
+                          }
                         }
-                      }
+                      ] : [])
                     ];
                     return (
                       <Dropdown menu={{ items: menuItems }} trigger={['click']}>

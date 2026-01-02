@@ -19,6 +19,7 @@ dayjs.extend(minMax)
 // 使用React.lazy动态导入组件
 const App = React.lazy(() => import('./App'))
 const LoginPage = React.lazy(() => import('./features/user/LoginPage'))
+const CertificateVerifyPage = React.lazy(() => import('./features/certificates/CertificateVerifyPage'))
 
 // 异步导入store
 const getStore = async () => {
@@ -71,6 +72,7 @@ const bootstrapApp = async () => {
                 <BrowserRouter>
                   <Routes>
                     <Route path="/login" element={<LoginPage />} />
+                    <Route path="/verify-certificate" element={<CertificateVerifyPage />} />
                     <Route element={<ProtectedRoute />}> 
                       <Route path="/" element={<App />} />
                     </Route>

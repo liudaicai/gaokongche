@@ -3,13 +3,14 @@
  * 智能提醒中心 - API路由
  */
 import express from 'express';
+import { tenantMiddleware } from '../middleware/tenant.js';
 export default function buildRemindersRouter(pool) {
   const router = express.Router();
 
   // ==================== 提醒规则API ====================
   
   // 获取规则列表
-  router.get('/rules', async (req, res) => {
+  router.get('/rules', tenantMiddleware, async (req, res) => {
     try {
       const { page = 1, pageSize = 20, ruleType, isEnabled } = req.query;
       const offset = (Number(page) - 1) * Number(pageSize);
@@ -82,7 +83,7 @@ export default function buildRemindersRouter(pool) {
   });
 
   // 获取规则详情
-  router.get('/rules/:id', async (req, res) => {
+  router.get('/rules/:id', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
       // 一户一库，不需要租户过滤
@@ -126,7 +127,7 @@ export default function buildRemindersRouter(pool) {
   });
 
   // 创建规则
-  router.post('/rules', async (req, res) => {
+  router.post('/rules', tenantMiddleware, async (req, res) => {
     try {
       const {
         ruleName,
@@ -178,7 +179,7 @@ export default function buildRemindersRouter(pool) {
   });
 
   // 更新规则
-  router.put('/rules/:id', async (req, res) => {
+  router.put('/rules/:id', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
       // 一户一库，不需要租户过滤
@@ -257,7 +258,7 @@ export default function buildRemindersRouter(pool) {
   });
 
   // 删除规则
-  router.delete('/rules/:id', async (req, res) => {
+  router.delete('/rules/:id', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
       // 一户一库，不需要租户过滤
@@ -288,7 +289,7 @@ export default function buildRemindersRouter(pool) {
   });
 
   // 启用/禁用规则
-  router.put('/rules/:id/toggle', async (req, res) => {
+  router.put('/rules/:id/toggle', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
       const { isEnabled } = req.body;
@@ -311,7 +312,7 @@ export default function buildRemindersRouter(pool) {
   // ==================== 提醒记录API ====================
   
   // 获取提醒列表
-  router.get('/', async (req, res) => {
+  router.get('/', tenantMiddleware, async (req, res) => {
     try {
       const {
         page = 1,
@@ -406,7 +407,7 @@ export default function buildRemindersRouter(pool) {
   });
 
   // 获取未读数量
-  router.get('/unread-count', async (req, res) => {
+  router.get('/unread-count', tenantMiddleware, async (req, res) => {
     try {
       const userId = req.user?.id;
       // 一户一库，不需要租户过滤
@@ -424,7 +425,7 @@ export default function buildRemindersRouter(pool) {
   });
 
   // 获取提醒详情
-  router.get('/:id', async (req, res) => {
+  router.get('/:id', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
       const userId = req.user?.id;
@@ -470,7 +471,7 @@ export default function buildRemindersRouter(pool) {
   });
 
   // 标记为已读
-  router.put('/:id/read', async (req, res) => {
+  router.put('/:id/read', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
       const userId = req.user?.id;
@@ -490,7 +491,7 @@ export default function buildRemindersRouter(pool) {
   });
 
   // 标记为已处理
-  router.put('/:id/handle', async (req, res) => {
+  router.put('/:id/handle', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
       const { note } = req.body;
@@ -512,7 +513,7 @@ export default function buildRemindersRouter(pool) {
   });
 
   // 批量标记已读
-  router.post('/batch-read', async (req, res) => {
+  router.post('/batch-read', tenantMiddleware, async (req, res) => {
     try {
       const { ids } = req.body;
       
@@ -538,7 +539,7 @@ export default function buildRemindersRouter(pool) {
   });
 
   // 删除提醒
-  router.delete('/:id', async (req, res) => {
+  router.delete('/:id', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
       const userId = req.user?.id;
@@ -559,7 +560,7 @@ export default function buildRemindersRouter(pool) {
   // ==================== 用户设置API ====================
   
   // 获取用户设置
-  router.get('/settings', async (req, res) => {
+  router.get('/settings', tenantMiddleware, async (req, res) => {
     try {
       const userId = req.user?.id;
       // 一户一库，不需要租户过滤
@@ -613,7 +614,7 @@ export default function buildRemindersRouter(pool) {
   });
 
   // 更新用户设置
-  router.put('/settings', async (req, res) => {
+  router.put('/settings', tenantMiddleware, async (req, res) => {
     try {
       const userId = req.user?.id;
       const companyId = req.user?.companyId || null;

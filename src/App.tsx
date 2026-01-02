@@ -28,7 +28,8 @@ import {
   ShoppingCartOutlined,
   KeyOutlined,
   CheckCircleOutlined,
-  TeamOutlined
+  TeamOutlined,
+  SafetyCertificateOutlined
 } from '@ant-design/icons';
 import { ProfileOutlined } from '@ant-design/icons';
 
@@ -36,6 +37,7 @@ const { Title, Text } = Typography;
 import './App.css'; // 保留原有CSS，但主要样式由 index.css 和 theme 覆盖
 import { TabsContext } from './features/common/TabsContext';
 import { initRealtime } from './realtime/realtime';
+import { TenantSwitcher } from './features/admin/TenantSwitcher';
 
 // Lazy Loads
 const CustomerList = lazy(() => import('./features/customers/CustomerList'));
@@ -70,6 +72,10 @@ const UserPermissionManager = lazy(() => import('./features/permissions/UserPerm
 const ApprovalCenter = lazy(() => import('./features/approvals/ApprovalCenter'));
 const OrganizationManagement = lazy(() => import('./features/organization/OrganizationManagement'));
 const EquipmentRentStatsPage = lazy(() => import('./features/equipment-stats/EquipmentRentStatsPage'));
+const OperatorCertificatesPage = lazy(() => import('./features/certificates/OperatorCertificatesPage'));
+const SealsManagementPage = lazy(() => import('./features/certificates/SealsManagementPage'));
+const TenantManagementPage = lazy(() => import('./features/admin/TenantManagementPage'));
+const BlacklistManagement = lazy(() => import('./features/blacklist/BlacklistManagement'));
 
 const { Sider, Content, Header } = Layout;
 
@@ -150,7 +156,12 @@ export default function App() {
       'usageAnalysis': '使用率分析',
       'purchases': '采购记录',
       'rolePermissions': '角色权限',
-      'userPermissions': '用户权限'
+      'userPermissions': '用户权限',
+      'operatorCertificates': '操作证管理',
+      'sealsManagement': '印章管理',
+      'equipmentRentStats': '租金统计',
+      'tenantManagement': '租户管理',
+      'blacklistManagement': '黑名单管理'
     };
     return map[key] || '未命名';
   };
@@ -184,7 +195,7 @@ export default function App() {
   const handleChangePassword = async () => {
     try {
       const values = await changePasswordForm.validateFields();
-      const token = localStorage.getItem('token') || localStorage.getItem('auth_token');
+      const token = sessionStorage.getItem('token') || sessionStorage.getItem('auth_token');
       
       const response = await fetch('/api/users/me/change-password', {
         method: 'PUT',
@@ -355,6 +366,10 @@ export default function App() {
       case 'equipmentRentStats': return <EquipmentRentStatsPage />;
       case 'rolePermissions': return <RolePermissionManager />;
       case 'userPermissions': return <UserPermissionManager />;
+      case 'operatorCertificates': return <OperatorCertificatesPage />;
+      case 'sealsManagement': return <SealsManagementPage />;
+      case 'tenantManagement': return <TenantManagementPage />;
+      case 'blacklistManagement': return <BlacklistManagement />;
       default: return <div>功能开发中</div>;
     }
   };
@@ -380,7 +395,10 @@ export default function App() {
   // 菜单数据 (保持不变)
   const baseMenuItems = [
     { key: 'home', icon: <HomeOutlined />, label: '首页' },
-    { key: 'customers', icon: <CustomerServiceOutlined />, label: '客户管理', children: [{ key: 'customerList', label: '客户列表' }] },
+    { key: 'customers', icon: <CustomerServiceOutlined />, label: '客户管理', children: [
+      { key: 'customerList', label: '客户列表' },
+      { key: 'blacklistManagement', label: '黑名单管理' }
+    ]},
     {
       key: 'equipment', icon: <DatabaseOutlined />, label: '设备管理', children: [
         { key: 'equipmentProfile', label: '设备档案' },
@@ -402,12 +420,13 @@ export default function App() {
     { key: 'templates', icon: <ProfileOutlined />, label: '模板管理', children: [{ key: 'templateManagement', label: '模板管理' }, { key: 'templateMapping', label: '模板映射' }] },
     { key: 'reminders', icon: <BellOutlined />, label: '提醒中心', children: [{ key: 'reminderCenter', label: '提醒中心' }] },
     { key: 'organization', icon: <TeamOutlined />, label: '组织管理', children: [{ key: 'organizationManagement', label: '部门职务' }] },
+    { key: 'certificates', icon: <SafetyCertificateOutlined />, label: '证件管理', children: [{ key: 'operatorCertificates', label: '操作证管理' }, { key: 'sealsManagement', label: '印章管理' }] },
     { key: 'permissions', icon: <KeyOutlined />, label: '权限管理', children: [{ key: 'rolePermissions', label: '角色权限' }, { key: 'userPermissions', label: '用户权限' }] },
   ];
 
-  // 超级管理员菜单（已移除公司管理）
+  // 超级管理员菜单
   const superAdminMenuItems = isSuperAdmin ? [
-    // { key: 'system', icon: <SettingOutlined />, label: '系统管理', children: [{ key: 'companiesManagement', label: '公司管理' }] },
+    { key: 'system', icon: <SettingOutlined />, label: '系统管理', children: [{ key: 'tenantManagement', label: '租户管理' }] },
   ] : [];
 
   const menuItems = [...baseMenuItems, ...superAdminMenuItems];
@@ -450,6 +469,10 @@ export default function App() {
             }}
           />
         </div>
+        
+        {/* 超级管理员：租户切换器 */}
+        {isSuperAdmin && !collapsed && <TenantSwitcher style={{ margin: '12px 8px' }} />}
+        
         <Menu
           theme="dark"
           mode="inline"

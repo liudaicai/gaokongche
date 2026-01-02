@@ -1,6 +1,7 @@
 // 一户一库，不需要租户过滤
 // 设备维修管理路由
 import express from 'express';
+import { tenantMiddleware } from '../middleware/tenant.js';
 export default function buildEquipmentRepairsRouterMySQL(pool) {
   const router = express.Router();
 
@@ -88,7 +89,7 @@ export default function buildEquipmentRepairsRouterMySQL(pool) {
   };
 
   // GET /api/equipment-repairs - 获取维修单列表
-  router.get('/', async (req, res) => {
+  router.get('/', tenantMiddleware, async (req, res) => {
     try {
       await ensureRepairTable();
 
@@ -196,7 +197,7 @@ export default function buildEquipmentRepairsRouterMySQL(pool) {
   });
 
   // GET /api/equipment-repairs/:id - 获取单个维修单
-  router.get('/:id', async (req, res) => {
+  router.get('/:id', tenantMiddleware, async (req, res) => {
     try {
       await ensureRepairTable();
 
@@ -250,7 +251,7 @@ export default function buildEquipmentRepairsRouterMySQL(pool) {
   });
 
   // POST /api/equipment-repairs - 创建维修单
-  router.post('/', async (req, res) => {
+  router.post('/', tenantMiddleware, async (req, res) => {
     try {
       await ensureRepairTable();
 
@@ -341,7 +342,7 @@ export default function buildEquipmentRepairsRouterMySQL(pool) {
   });
 
   // PUT /api/equipment-repairs/:id - 更新维修单
-  router.put('/:id', async (req, res) => {
+  router.put('/:id', tenantMiddleware, async (req, res) => {
     try {
       await ensureRepairTable();
 
@@ -420,7 +421,7 @@ export default function buildEquipmentRepairsRouterMySQL(pool) {
   });
 
   // DELETE /api/equipment-repairs/:id - 删除维修单（取消维修）
-  router.delete('/:id', async (req, res) => {
+  router.delete('/:id', tenantMiddleware, async (req, res) => {
     try {
       await ensureRepairTable();
 
@@ -461,7 +462,7 @@ export default function buildEquipmentRepairsRouterMySQL(pool) {
   });
 
   // POST /api/equipment-repairs/:id/complete - 完成维修
-  router.post('/:id/complete', async (req, res) => {
+  router.post('/:id/complete', tenantMiddleware, async (req, res) => {
     try {
       await ensureRepairTable();
 

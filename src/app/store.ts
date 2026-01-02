@@ -22,6 +22,7 @@ import remindersReducer from '../features/reminders/remindersSlice'
 import dashboardReducer from '../features/dashboard/dashboardSlice'
 import purchasesReducer from '../features/purchases/purchasesSlice'
 import workflowsReducer from '../features/workflows/workflowsSlice'
+import blacklistReducer from '../features/blacklist/blacklistSlice'
 
 // 创建store配置
 export const store = configureStore({
@@ -46,8 +47,9 @@ export const store = configureStore({
     dashboard: dashboardReducer,
     purchases: purchasesReducer,
     workflows: workflowsReducer,
+    blacklist: blacklistReducer,
     app: (state = {}) => state,
-    auth: authReducer
+    auth: authReducer,
   },
 })
 

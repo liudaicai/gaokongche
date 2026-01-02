@@ -12,6 +12,8 @@ import {
 import { fetchStores, selectStores } from '../stores/storesSlice';
 import { fetchUsers } from '../users/usersSlice';
 import { recognizeIDCard, recognizeBusinessLicense, type IDCardOCRResult, type BusinessLicenseOCRResult } from '../../utils/ocr';
+import { checkBlacklist } from '../blacklist/blacklistSlice';
+import type { BlacklistRecord } from '../blacklist/types';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -344,11 +346,139 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
     }
   };
 
+  // 检查黑名单
+  const checkCustomerBlacklist = async (values: any): Promise<boolean> => {
+    try {
+      const checkParams: any = { context: '新增客户' };
+      
+      if (customerType === 'personal') {
+        checkParams.customerName = values.name;
+        checkParams.customerPhone = values.phone;
+        checkParams.customerIdCard = values.idCardNumber;
+      } else {
+        checkParams.customerName = values.companyName;
+      }
+      
+      const result = await dispatch(checkBlacklist(checkParams)).unwrap();
+      
+      if (result.isBlacklisted && result.records.length > 0) {
+        // 显示黑名单警告
+        return new Promise((resolve) => {
+          const blacklistRecords = result.records;
+          const getSeverityColor = (severity: string) => {
+            switch (severity) {
+              case 'critical': return '#d32f2f';
+              case 'high': return '#f44336';
+              case 'medium': return '#ff9800';
+              case 'low': return '#2196f3';
+              default: return '#666';
+            }
+          };
+          
+          const getSeverityText = (severity: string) => {
+            switch (severity) {
+              case 'critical': return '极高风险';
+              case 'high': return '高风险';
+              case 'medium': return '中风险';
+              case 'low': return '低风险';
+              default: return '未知';
+            }
+          };
+          
+          modal.confirm({
+            title: '⚠️ 黑名单警告',
+            width: 600,
+            content: (
+              <div>
+                <Alert
+                  message="该客户已在黑名单中"
+                  description="系统检测到该客户存在黑名单记录，建议谨慎处理。"
+                  type="error"
+                  showIcon
+                  style={{ marginBottom: 16 }}
+                />
+                
+                {blacklistRecords.map((record: BlacklistRecord, index: number) => (
+                  <div 
+                    key={record.id} 
+                    style={{ 
+                      marginBottom: 12, 
+                      padding: 12, 
+                      background: '#fff3f3', 
+                      border: '1px solid #ffccc7',
+                      borderRadius: 4 
+                    }}
+                  >
+                    <div style={{ marginBottom: 8 }}>
+                      <span style={{ 
+                        fontWeight: 'bold', 
+                        color: getSeverityColor(record.severity)
+                      }}>
+                        风险等级: {getSeverityText(record.severity)}
+                      </span>
+                    </div>
+                    <div style={{ marginBottom: 4 }}>
+                      <strong>客户名称：</strong>{record.customerName}
+                    </div>
+                    {record.customerPhone && (
+                      <div style={{ marginBottom: 4 }}>
+                        <strong>电话：</strong>{record.customerPhone}
+                      </div>
+                    )}
+                    <div style={{ marginBottom: 4 }}>
+                      <strong>加入原因：</strong>{record.reason}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#666' }}>
+                      <strong>上传者：</strong>{record.uploaderName} | 
+                      <strong> 上传时间：</strong>{new Date(record.uploadTime).toLocaleString()}
+                    </div>
+                  </div>
+                ))}
+                
+                <p style={{ marginTop: 16, color: '#666', fontSize: 13 }}>
+                  是否仍要继续添加该客户？
+                </p>
+              </div>
+            ),
+            okText: '继续添加',
+            cancelText: '取消',
+            onOk: () => resolve(true),
+            onCancel: () => resolve(false),
+          });
+        });
+      }
+      
+      return true;
+    } catch (error: any) {
+      console.error('黑名单检查失败:', error);
+      // 检查失败时，询问用户是否继续
+      return new Promise((resolve) => {
+        modal.confirm({
+          title: '黑名单检查失败',
+          content: '无法连接到黑名单服务，是否继续添加客户？',
+          okText: '继续',
+          cancelText: '取消',
+          onOk: () => resolve(true),
+          onCancel: () => resolve(false),
+        });
+      });
+    }
+  };
+
   // 处理表单提交
   const handleSubmit = async () => {
     try {
       setIsSubmitting(true);
       const values = await form.validateFields();
+
+      // 黑名单检查（仅新增客户时检查，编辑客户不检查）
+      if (!customer) {
+        const canProceed = await checkCustomerBlacklist(values);
+        if (!canProceed) {
+          setIsSubmitting(false);
+          return;
+        }
+      }
 
       const selectedStore = stores.find(s => s.id === values.regionStoreId);
       const selectedUser = users.find((u: any) => u.id === values.businessManagerId);

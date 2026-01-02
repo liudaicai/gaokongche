@@ -3,6 +3,7 @@
  * 支持报停申请、审批、结束等完整流程
  */
 import express from 'express';
+import { tenantMiddleware } from '../middleware/tenant.js';
 export default function buildOrderSuspensionsRouter(pool) {
   // ⚠️ 必须开启 mergeParams: true 才能获取父级路由的参数 (如 :orderId)
   const router = express.Router({ mergeParams: true });
@@ -40,7 +41,7 @@ export default function buildOrderSuspensionsRouter(pool) {
 
   // ==================== 获取订单的报停记录列表 ====================
   // GET /api/orders/:orderId/suspensions
-  router.get('/', async (req, res) => {
+  router.get('/', tenantMiddleware, async (req, res) => {
     try {
       console.log('[OrderSuspensions] GET / - Request params:', req.params);
       console.log('[OrderSuspensions] Request URL:', req.originalUrl);
@@ -128,7 +129,7 @@ export default function buildOrderSuspensionsRouter(pool) {
 
   // ==================== 创建报停申请 ====================
   // POST /api/orders/:orderId/suspensions
-  router.post('/', async (req, res) => {
+  router.post('/', tenantMiddleware, async (req, res) => {
     const conn = await pool.getConnection();
     
     try {
@@ -431,7 +432,7 @@ export default function buildOrderSuspensionsRouter(pool) {
 
   // ==================== 审批报停申请 ====================
   // PUT /api/orders/:orderId/suspensions/:id/approve
-  router.put('/:id/approve', async (req, res) => {
+  router.put('/:id/approve', tenantMiddleware, async (req, res) => {
     const conn = await pool.getConnection();
     
     try {
@@ -539,7 +540,7 @@ export default function buildOrderSuspensionsRouter(pool) {
 
   // ==================== 结束报停 ====================
   // PUT /api/orders/:orderId/suspensions/:id/end
-  router.put('/:id/end', async (req, res) => {
+  router.put('/:id/end', tenantMiddleware, async (req, res) => {
     const conn = await pool.getConnection();
     
     try {
@@ -645,7 +646,7 @@ export default function buildOrderSuspensionsRouter(pool) {
 
   // ==================== 删除报停记录 ====================
   // DELETE /api/orders/:orderId/suspensions/:id
-  router.delete('/:id', async (req, res) => {
+  router.delete('/:id', tenantMiddleware, async (req, res) => {
     const conn = await pool.getConnection();
     
     try {
@@ -705,7 +706,7 @@ export default function buildOrderSuspensionsRouter(pool) {
 
   // ==================== 获取报停统计 ====================
   // GET /api/orders/:orderId/suspensions/stats
-  router.get('/stats', async (req, res) => {
+  router.get('/stats', tenantMiddleware, async (req, res) => {
     try {
       const orderId = Number(req.params.orderId);
       

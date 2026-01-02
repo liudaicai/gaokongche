@@ -3,6 +3,7 @@
  */
 
 import express from 'express';
+import { tenantMiddleware } from '../middleware/tenant.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 
 export default function buildPositionsRouter(pool) {
@@ -14,12 +15,17 @@ export default function buildPositionsRouter(pool) {
    */
   router.get(
     '/',
+    tenantMiddleware,
     asyncHandler(async (req, res) => {
       const { category, department_id, can_approve, is_active } = req.query;
+
+      // ✅ 多租户过滤
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
 
       let sql = `
         SELECT 
           p.id,
+          p.company_id,
           p.name,
           p.code,
           p.level,
@@ -33,12 +39,12 @@ export default function buildPositionsRouter(pool) {
           p.is_active,
           p.created_at,
           p.updated_at,
-          (SELECT COUNT(*) FROM users WHERE position_id = p.id AND is_deleted = 0) as employee_count
+          (SELECT COUNT(*) FROM users WHERE position_id = p.id) as employee_count
         FROM positions p
-        WHERE p.is_deleted = 0
+        WHERE ${tenantWhere.replace(/\bcompany_id\b/g, 'p.company_id')}
       `;
 
-      const params = [];
+      const params = [...tenantParams];
 
       if (category) {
         sql += ' AND p.category = ?';
@@ -87,8 +93,12 @@ export default function buildPositionsRouter(pool) {
    */
   router.get(
     '/:id',
+    tenantMiddleware,
     asyncHandler(async (req, res) => {
       const { id } = req.params;
+
+      // ✅ 多租户过滤
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
 
       const connection = await pool.getConnection();
       try {
@@ -96,17 +106,17 @@ export default function buildPositionsRouter(pool) {
           `SELECT 
             p.*,
             d.name as department_name,
-            (SELECT COUNT(*) FROM users WHERE position_id = p.id AND is_deleted = 0) as employee_count
-           FROM positions p
+            (SELECT COUNT(*) FROM users WHERE position_id = p.id) as employee_count
+          FROM positions p
            LEFT JOIN departments d ON p.department_id = d.id
-           WHERE p.id = ? AND p.is_deleted = 0`,
-          [id]
+           WHERE p.id = ? AND ${tenantWhere.replace(/\bcompany_id\b/g, 'p.company_id')}`,
+          [id, ...tenantParams]
         );
 
         if (positions.length === 0) {
           return res.status(404).json({
             ok: false,
-            error: '职务不存在',
+            error: '职务不存在或无权访问',
           });
         }
 
@@ -117,7 +127,7 @@ export default function buildPositionsRouter(pool) {
             u.department_id, d.name as department_name
            FROM users u
            LEFT JOIN departments d ON u.department_id = d.id
-           WHERE u.position_id = ? AND u.is_deleted = 0
+           WHERE u.position_id = ?
            ORDER BY u.name`,
           [id]
         );
@@ -141,6 +151,7 @@ export default function buildPositionsRouter(pool) {
    */
   router.post(
     '/',
+    tenantMiddleware,
     asyncHandler(async (req, res) => {
       const {
         name,
@@ -156,6 +167,7 @@ export default function buildPositionsRouter(pool) {
       } = req.body;
 
       const userId = req.user.id;
+      const companyId = req.user.company_id; // ✅ 获取当前用户的 company_id
 
       const connection = await pool.getConnection();
       try {
@@ -163,11 +175,12 @@ export default function buildPositionsRouter(pool) {
 
         const [result] = await connection.query(
           `INSERT INTO positions (
-            name, code, level, category, department_id,
+            company_id, name, code, level, category, department_id,
             can_approve, approval_level, description, responsibilities,
             sort_order, created_by, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3))`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3))`,
           [
+            companyId, // ✅ 添加 company_id
             name,
             code || null,
             level || 0,
@@ -206,6 +219,7 @@ export default function buildPositionsRouter(pool) {
    */
   router.put(
     '/:id',
+    tenantMiddleware,
     asyncHandler(async (req, res) => {
       const { id } = req.params;
       const {
@@ -222,11 +236,14 @@ export default function buildPositionsRouter(pool) {
         is_active,
       } = req.body;
 
+      // ✅ 多租户过滤
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+
       const connection = await pool.getConnection();
       try {
         await connection.beginTransaction();
 
-        await connection.query(
+        const [result] = await connection.query(
           `UPDATE positions SET
             name = ?,
             code = ?,
@@ -240,7 +257,7 @@ export default function buildPositionsRouter(pool) {
             sort_order = ?,
             is_active = ?,
             updated_at = NOW(3)
-           WHERE id = ? AND is_deleted = 0`,
+           WHERE id = ? AND ${tenantWhere.replace(/\bcompany_id\b/g, 'company_id')}`,
           [
             name,
             code,
@@ -254,8 +271,16 @@ export default function buildPositionsRouter(pool) {
             sort_order,
             is_active,
             id,
+            ...tenantParams,
           ]
         );
+
+        if (result.affectedRows === 0) {
+          return res.status(404).json({
+            ok: false,
+            error: '职务不存在或无权访问',
+          });
+        }
 
         await connection.commit();
 
@@ -274,12 +299,16 @@ export default function buildPositionsRouter(pool) {
 
   /**
    * DELETE /api/positions/:id
-   * 删除职务（软删除）
+   * 删除职务
    */
   router.delete(
     '/:id',
+    tenantMiddleware,
     asyncHandler(async (req, res) => {
       const { id } = req.params;
+
+      // ✅ 多租户过滤
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
 
       const connection = await pool.getConnection();
       try {
@@ -287,7 +316,7 @@ export default function buildPositionsRouter(pool) {
 
         // 检查是否有员工
         const [employees] = await connection.query(
-          `SELECT COUNT(*) as count FROM users WHERE position_id = ? AND is_deleted = 0`,
+          `SELECT COUNT(*) as count FROM users WHERE position_id = ?`,
           [id]
         );
 
@@ -298,10 +327,17 @@ export default function buildPositionsRouter(pool) {
           });
         }
 
-        await connection.query(
-          `UPDATE positions SET is_deleted = 1, deleted_at = NOW(3) WHERE id = ?`,
-          [id]
+        const [result] = await connection.query(
+          `DELETE FROM positions WHERE id = ? AND ${tenantWhere.replace(/\bcompany_id\b/g, 'company_id')}`,
+          [id, ...tenantParams]
         );
+
+        if (result.affectedRows === 0) {
+          return res.status(404).json({
+            ok: false,
+            error: '职务不存在或无权访问',
+          });
+        }
 
         await connection.commit();
 

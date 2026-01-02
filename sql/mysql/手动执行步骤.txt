@@ -1,0 +1,61 @@
+数据库优化手动执行步骤
+================================
+
+请在命令提示符（CMD）中按以下步骤执行：
+
+步骤 1: 打开命令提示符
+----------------------
+Win + R，输入 cmd，按回车
+
+
+步骤 2: 切换到脚本目录
+----------------------
+cd /d D:\kaifa\4\sql\mysql
+
+
+步骤 3: 创建备份目录
+----------------------
+mkdir backups
+
+
+步骤 4: 备份数据库
+----------------------
+"C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqldump" -u root -p gaokongche > backups\backup_%date:~0,4%%date:~5,2%%date:~8,2%.sql
+
+（注意：请根据您的 MySQL 安装路径调整命令，常见路径：
+  - C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqldump
+  - C:\xampp\mysql\bin\mysqldump
+  - C:\wamp64\bin\mysql\mysql8.0.27\bin\mysqldump
+）
+
+
+步骤 5: 执行优化脚本
+----------------------
+"C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -u root -p gaokongche < 217_merge_finance_records.sql
+
+"C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -u root -p gaokongche < 218_optimize_reminder_system.sql
+
+"C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -u root -p gaokongche < 219_simplify_approval_system.sql
+
+
+步骤 6: 验证数据
+----------------------
+"C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -u root -p gaokongche < 220_validate_migration.sql > validation_result.txt
+
+
+步骤 7: 查看验证结果
+----------------------
+type validation_result.txt
+
+
+完成！
+================================
+
+如果一切正常，请继续：
+1. 查看 "数据库优化实施指南.md" 
+2. 更新后端和前端代码
+3. 测试所有功能
+
+如果遇到问题，使用备份恢复：
+"C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql" -u root -p gaokongche < backups\backup_XXXXXX.sql
+

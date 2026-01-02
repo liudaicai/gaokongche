@@ -49,15 +49,15 @@ export default defineConfig({
     proxy: {
       '/api': {
         // 使用 127.0.0.1 避免 Windows/IPv6 环境下 localhost 解析为 ::1 导致代理连接拒绝
-        // 切换到 MySQL 模式后端端口 3001
-        target: 'http://127.0.0.1:3001',
+        // 切换到 MySQL 模式后端端口 3003
+        target: 'http://127.0.0.1:3003',
         changeOrigin: true,
         // 不要 rewrite，保留 /api 前缀
         // rewrite: (path) => path.replace(/^\/api/, ''),
       },
       // 代理静态上传文件访问，避免直接命中前端开发服务器导致 404
       '/uploads': {
-        target: 'http://127.0.0.1:3001',
+        target: 'http://127.0.0.1:3003',
         changeOrigin: true,
       },
     },

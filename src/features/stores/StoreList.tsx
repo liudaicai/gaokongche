@@ -46,15 +46,15 @@ const StoreList: React.FC = () => {
     try {
       await dispatch(deleteStore(storeId)).unwrap();
       message.success('门店删除成功');
-    } catch (error) {
-      message.error('门店删除失败');
+    } catch (error: any) {
+      message.error(error?.message || '门店删除失败');
     }
   };
   
   // 保存门店信息
   const handleSaveStore = async () => {
     console.log('[StoreList] 开始保存门店...');
-    console.log('[StoreList] 当前 token:', localStorage.getItem('auth_token')?.substring(0, 20) + '...');
+    console.log('[StoreList] 当前 token:', sessionStorage.getItem('auth_token')?.substring(0, 20) + '...');
     
     try {
       const values = await form.validateFields();

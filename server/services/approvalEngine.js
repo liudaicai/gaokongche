@@ -496,7 +496,7 @@ class ApprovalEngine {
       // 指定用户
       const userIds = config.userIds || [];
       const [users] = await connection.query(
-        `SELECT id, name FROM users WHERE id IN (?) AND is_deleted = 0`,
+        `SELECT id, COALESCE(NULLIF(name, ''), username) as name FROM users WHERE id IN (?) AND is_deleted = 0`,
         [userIds]
       );
       approvers = users.map(u => ({
@@ -509,7 +509,7 @@ class ApprovalEngine {
     } else if (approverType === 'role') {
       // 指定角色
       const [users] = await connection.query(
-        `SELECT id, name FROM users WHERE role = ? AND is_deleted = 0`,
+        `SELECT id, COALESCE(NULLIF(name, ''), username) as name FROM users WHERE role = ? AND is_deleted = 0`,
         [config.roleCode]
       );
       approvers = users.map(u => ({
@@ -530,7 +530,7 @@ class ApprovalEngine {
       const userId = businessData?.businessManagerId;
       if (userId) {
         const [users] = await connection.query(
-          `SELECT id, name FROM users WHERE id = ? AND is_deleted = 0`,
+          `SELECT id, COALESCE(NULLIF(name, ''), username) as name FROM users WHERE id = ? AND is_deleted = 0`,
           [userId]
         );
         if (users.length > 0) {
@@ -915,7 +915,7 @@ class ApprovalEngine {
       if (approver.type === 'user') {
         // 指定用户
         const [users] = await connection.query(
-          `SELECT id, name FROM users WHERE id = ? AND is_deleted = 0`,
+          `SELECT id, COALESCE(NULLIF(name, ''), username) as name FROM users WHERE id = ? AND is_deleted = 0`,
           [approver.value]
         );
         if (users.length > 0) {
@@ -929,7 +929,7 @@ class ApprovalEngine {
       } else if (approver.type === 'role') {
         // 角色
         const [users] = await connection.query(
-          `SELECT id, name FROM users WHERE role = ? AND is_deleted = 0`,
+          `SELECT id, COALESCE(NULLIF(name, ''), username) as name FROM users WHERE role = ? AND is_deleted = 0`,
           [approver.value]
         );
         users.forEach(user => {
@@ -944,7 +944,7 @@ class ApprovalEngine {
       } else if (approver.type === 'department') {
         // 部门
         const [users] = await connection.query(
-          `SELECT id, name FROM users WHERE department_id = ? AND is_deleted = 0`,
+          `SELECT id, COALESCE(NULLIF(name, ''), username) as name FROM users WHERE department_id = ? AND is_deleted = 0`,
           [approver.value]
         );
         users.forEach(user => {

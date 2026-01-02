@@ -481,17 +481,13 @@ const LogisticsManagement: React.FC = () => {
             label: '自有物流',
             children: (
               <div>
-                <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between' }}>
-                  <Button type="primary" icon={<PlusOutlined />} onClick={showAddVehicleModal}>
-                    新增车辆
-                  </Button>
-                  <Button type="primary" icon={<PlusOutlined />} onClick={showAddDriverModal}>
-                    新增司机
-                  </Button>
-                </div>
-                
                 {/* 车辆列表 */}
                 <div style={{ marginBottom: '24px' }}>
+                  <div style={{ marginBottom: '16px' }}>
+                    <Button type="primary" icon={<PlusOutlined />} onClick={showAddVehicleModal}>
+                      新增车辆
+                    </Button>
+                  </div>
                   <h3 style={{ marginBottom: '16px' }}>拖车列表</h3>
                   <Table
                     columns={vehicleColumns}
@@ -508,6 +504,11 @@ const LogisticsManagement: React.FC = () => {
                 
                 {/* 司机列表 */}
                 <div>
+                  <div style={{ marginBottom: '16px' }}>
+                    <Button type="primary" icon={<PlusOutlined />} onClick={showAddDriverModal}>
+                      新增司机
+                    </Button>
+                  </div>
                   <h3 style={{ marginBottom: '16px' }}>司机列表</h3>
                   <Table
                     columns={driverColumns}

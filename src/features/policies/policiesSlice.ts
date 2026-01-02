@@ -77,7 +77,7 @@ export const deletePolicy = createAsyncThunk(
 export const downloadPolicyAttachment = createAsyncThunk(
   'policies/downloadAttachment',
   async ({ policyId, attachmentId }: { policyId: string | number; attachmentId: string | number }) => {
-    const token = localStorage.getItem('auth_token');
+    const token = sessionStorage.getItem('auth_token');
     const response = await fetch(`/api/policies/${policyId}/attachments/${attachmentId}`, {
       headers: {
         'Authorization': `Bearer ${token}`

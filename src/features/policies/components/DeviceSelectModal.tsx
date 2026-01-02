@@ -72,7 +72,7 @@ const DeviceSelectModal: React.FC<Props> = ({
       
       // 直接使用 fetch 获取完整响应（包含 total）
       const url = `/api/equipments?${queryString}`;
-      const token = localStorage.getItem('auth_token');
+      const token = sessionStorage.getItem('auth_token');
       const headers: HeadersInit = {
         'Content-Type': 'application/json',
       };

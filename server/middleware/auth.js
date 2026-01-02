@@ -86,12 +86,38 @@ export function optionalAuthMiddleware(req, res, next) {
 }
 
 /**
- * 角色验证中间件工厂 - 已禁用，所有用户平等
- * @param {string[]} allowedRoles - 允许的角色列表（已废弃）
+ * 角色验证中间件工厂
+ * @param {string[]} allowedRoles - 允许的角色列表
  */
 export function requireRole(...allowedRoles) {
   return (req, res, next) => {
-    // ✅ 角色检查已禁用 - 单租户系统所有用户平等
+    if (!req.user) {
+      return res.status(401).json({ 
+        ok: false, 
+        error: '未登录，请先登录' 
+      });
+    }
+
+    const userRole = req.user.role;
+    
+    // 检查用户角色是否在允许的角色列表中
+    if (!allowedRoles.includes(userRole)) {
+      console.log(`[RequireRole] ❌ 权限不足: 用户角色=${userRole}, 需要角色=${allowedRoles.join('|')}`);
+      return res.status(403).json({ 
+        ok: false, 
+        error: `权限不足，需要 ${allowedRoles.join(' 或 ')} 权限` 
+      });
+    }
+
+    console.log(`[RequireRole] ✅ 权限验证通过: 用户角色=${userRole}`);
     next();
   };
+}
+
+/**
+ * 超级管理员验证中间件
+ * 只允许超级管理员访问
+ */
+export function requireSuperAdmin(req, res, next) {
+  return requireRole('super_admin', 'superadmin')(req, res, next);
 }

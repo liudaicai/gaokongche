@@ -3,6 +3,7 @@
  */
 
 import express from 'express';
+import { tenantMiddleware } from '../middleware/tenant.js';
 
 export default function buildRouter(pool) {
   const router = express.Router();
@@ -11,7 +12,7 @@ export default function buildRouter(pool) {
    * GET /api/part-replacements/categories
    * 获取配件类别列表
    */
-  router.get('/categories', async (req, res) => {
+  router.get('/categories', tenantMiddleware, async (req, res) => {
     try {
       const [categories] = await pool.query(
         'SELECT * FROM high_value_part_categories ORDER BY sort_order'
@@ -40,7 +41,7 @@ export default function buildRouter(pool) {
    * POST /api/part-replacements
    * 添加配件更换记录
    */
-  router.post('/', async (req, res) => {
+  router.post('/', tenantMiddleware, async (req, res) => {
     try {
       const {
         equipmentId,
@@ -135,7 +136,7 @@ export default function buildRouter(pool) {
    * 获取设备的配件更换历史
    * Query: partCategoryId, startDate, endDate, warrantyStatus
    */
-  router.get('/equipment/:equipmentId', async (req, res) => {
+  router.get('/equipment/:equipmentId', tenantMiddleware, async (req, res) => {
     try {
       const { equipmentId } = req.params;
       const { partCategoryId, startDate, endDate, warrantyStatus } = req.query;
@@ -190,7 +191,7 @@ export default function buildRouter(pool) {
    * GET /api/part-replacements/:id
    * 获取配件更换记录详情
    */
-  router.get('/:id', async (req, res) => {
+  router.get('/:id', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
 
@@ -224,7 +225,7 @@ export default function buildRouter(pool) {
    * PUT /api/part-replacements/:id
    * 更新配件更换记录
    */
-  router.put('/:id', async (req, res) => {
+  router.put('/:id', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
       const updateData = req.body;
@@ -297,7 +298,7 @@ export default function buildRouter(pool) {
    * DELETE /api/part-replacements/:id
    * 删除配件更换记录
    */
-  router.delete('/:id', async (req, res) => {
+  router.delete('/:id', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
 
@@ -328,7 +329,7 @@ export default function buildRouter(pool) {
    * 获取保修到期提醒
    * Query: days (默认30天内到期)
    */
-  router.get('/warranty/alerts', async (req, res) => {
+  router.get('/warranty/alerts', tenantMiddleware, async (req, res) => {
     try {
       const { days = 30 } = req.query;
 
@@ -393,7 +394,7 @@ export default function buildRouter(pool) {
    * GET /api/part-replacements/summary/equipment/:equipmentId
    * 获取设备配件更换汇总
    */
-  router.get('/summary/equipment/:equipmentId', async (req, res) => {
+  router.get('/summary/equipment/:equipmentId', tenantMiddleware, async (req, res) => {
     try {
       const { equipmentId } = req.params;
 

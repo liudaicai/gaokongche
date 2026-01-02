@@ -1,4 +1,5 @@
 import express from 'express';
+import { tenantMiddleware, setTenantId, buildWhereClause } from '../middleware/tenant.js';
 
 export default function buildEquipmentsRouterMySQL(pool) {
   const router = express.Router();
@@ -36,9 +37,11 @@ export default function buildEquipmentsRouterMySQL(pool) {
   // ----------------------------------------------------------------
   // 库存统计 API（必须放在 /:id 之前，否则会被 /:id 拦截）
   // ----------------------------------------------------------------
-  router.get('/inventory/stats', async (req, res) => {
+  router.get('/inventory/stats', tenantMiddleware, async (req, res) => {
     try {
-      // 一户一库，不需要租户过滤
+      // ✅ 多租户过滤 - 为 company_id 添加表前缀以避免歧义
+      const { where, params } = req.tenantFilter;
+      const equipmentWhere = where.replace(/\bcompany_id\b/g, 'e.company_id');
 
       // 统一使用rental_status字段统计设备状态，处理NULL值（NULL视为available）
       const query = `
@@ -52,12 +55,12 @@ export default function buildEquipmentsRouterMySQL(pool) {
           COUNT(*) as totalCount
         FROM equipments e
         LEFT JOIN stores s ON e.store_id = s.id
-        WHERE e.deleted_at IS NULL
+        WHERE e.deleted_at IS NULL AND ${equipmentWhere}
         GROUP BY COALESCE(e.type, '未分类'), COALESCE(e.height, 0), COALESCE(s.name, e.warehouse, '默认区域')
         ORDER BY COALESCE(e.type, '未分类'), COALESCE(e.height, 0)
       `;
 
-      const [rows] = await pool.query(query);
+      const [rows] = await pool.query(query, params);
 
       const data = (rows || []).map(r => ({
         type: r.type || '未分类',
@@ -167,14 +170,16 @@ export default function buildEquipmentsRouterMySQL(pool) {
   // ----------------------------------------------------------------
   // 获取设备列表
   // ----------------------------------------------------------------
-  router.get('/', async (req, res) => {
+  router.get('/', tenantMiddleware, async (req, res) => {
     try {
       const { page = 1, pageSize = 10000, type, height, storeId, status, keyword } = req.query;
       const offset = (Number(page) - 1) * Number(pageSize);
       
-      // 一户一库，不需要租户过滤
-      let whereClause = `e.deleted_at IS NULL`;
-      const params = [];
+      // ✅ 多租户过滤（为 company_id 添加表别名前缀 e.）
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+      const tenantWhereWithPrefix = tenantWhere.replace(/\bcompany_id\b/g, 'e.company_id');
+      let whereClause = `e.deleted_at IS NULL AND ${tenantWhereWithPrefix}`;
+      const params = [...tenantParams];
 
       if (type) {
         whereClause += ' AND e.type = ?';
@@ -379,12 +384,15 @@ export default function buildEquipmentsRouterMySQL(pool) {
   // ----------------------------------------------------------------
   // 创建设备
   // ----------------------------------------------------------------
-  router.post('/', async (req, res) => {
+  router.post('/', tenantMiddleware, async (req, res) => {
     try {
       let data = req.body;
       
       // 转换驼峰命名为下划线命名
       data = keysToSnakeCase(data);
+      
+      // ✅ 多租户：自动设置 company_id
+      data.company_id = req.tenantId;
       
       // 移除 id, created_at, updated_at 等系统字段
       delete data.id;

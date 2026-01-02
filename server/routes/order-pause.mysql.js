@@ -4,11 +4,12 @@
  */
 
 import express from 'express';
+import { tenantMiddleware } from '../middleware/tenant.js';
 export default function buildOrderPauseRouter(pool) {
   const router = express.Router();
 
   // ==================== 1. 报停列表 ====================
-  router.get('/', async (req, res) => {
+  router.get('/', tenantMiddleware, async (req, res) => {
     try {
       const page = Number(req.query.page) || 1;
       const pageSize = Number(req.query.pageSize) || 20;
@@ -63,7 +64,7 @@ export default function buildOrderPauseRouter(pool) {
   });
 
   // ==================== 2. 创建报停申请 ====================
-  router.post('/', async (req, res) => {
+  router.post('/', tenantMiddleware, async (req, res) => {
     try {
       const data = req.body;
       
@@ -94,7 +95,7 @@ export default function buildOrderPauseRouter(pool) {
   });
 
   // ==================== 3. 审批报停 ====================
-  router.post('/:id/approve', async (req, res) => {
+  router.post('/:id/approve', tenantMiddleware, async (req, res) => {
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
@@ -140,7 +141,7 @@ export default function buildOrderPauseRouter(pool) {
   });
 
   // ==================== 4. 结束报停 ====================
-  router.post('/:id/end', async (req, res) => {
+  router.post('/:id/end', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
       const { actualEndDate, notes } = req.body;
@@ -177,7 +178,7 @@ export default function buildOrderPauseRouter(pool) {
   });
 
   // ==================== 5. 取消报停 ====================
-  router.put('/:id/cancel', async (req, res) => {
+  router.put('/:id/cancel', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
       
@@ -194,7 +195,7 @@ export default function buildOrderPauseRouter(pool) {
   });
 
   // ==================== 6. 报停统计 ====================
-  router.get('/statistics/summary', async (req, res) => {
+  router.get('/statistics/summary', tenantMiddleware, async (req, res) => {
     try {
       const [rows] = await pool.query(
         `SELECT

@@ -160,7 +160,7 @@ export const fetchCompanies = createAsyncThunk(
     const response = await fetch(url, {
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+        'Authorization': `Bearer ${sessionStorage.getItem('auth_token')}`,
       },
     });
     
@@ -238,7 +238,7 @@ export const fetchEquipments = createAsyncThunk(
     const response = await fetch(url, {
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+        'Authorization': `Bearer ${sessionStorage.getItem('auth_token')}`,
       },
     });
     

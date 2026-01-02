@@ -241,7 +241,12 @@ export default function buildApprovalConfigRouter(pool) {
       const connection = await pool.getConnection();
       try {
         const [users] = await connection.query(
-          `SELECT id, username, name, role, company_id
+          `SELECT 
+             id, 
+             username, 
+             COALESCE(NULLIF(name, ''), username) as name,
+             role, 
+             company_id
            FROM users
            ORDER BY name`
         );

@@ -1,5 +1,6 @@
 // 一户一库，不需要租户过滤
 import express from 'express';
+import { tenantMiddleware } from '../middleware/tenant.js';
 export default function buildPartsRouter(pool) {
   const router = express.Router();
 
@@ -45,10 +46,10 @@ export default function buildPartsRouter(pool) {
   // ================================================================
   // 1. 获取配件列表（带库存信息）
   // ================================================================
-  router.get('/', async (req, res) => {
+  router.get('/', tenantMiddleware, async (req, res) => {
     try {
-      // 不再使用 tenantFilter（多租户已移除）
-      const params = [];
+      // ✅ 多租户过滤
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
       
       const query = `
         SELECT 
@@ -56,11 +57,11 @@ export default function buildPartsRouter(pool) {
           u.username as creator_name
         FROM parts p
         LEFT JOIN users u ON p.created_by = u.id
-        WHERE p.deleted_at IS NULL
+        WHERE p.deleted_at IS NULL AND p.${tenantWhere}
         ORDER BY p.created_at DESC
       `;
       
-      const [parts] = await pool.query(query, params);
+      const [parts] = await pool.query(query, tenantParams);
       
       // 获取每个配件的库存信息
       for (let part of parts) {
@@ -91,7 +92,7 @@ export default function buildPartsRouter(pool) {
   // ================================================================
   // 2. 获取下一个配件编号
   // ================================================================
-  router.get('/next-code', async (req, res) => {
+  router.get('/next-code', tenantMiddleware, async (req, res) => {
     try {
       const today = new Date();
       const dateStr = today.toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
@@ -125,7 +126,7 @@ export default function buildPartsRouter(pool) {
   // ================================================================
   // 3. 新增配件
   // ================================================================
-  router.post('/', async (req, res) => {
+  router.post('/', tenantMiddleware, async (req, res) => {
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
@@ -165,7 +166,7 @@ export default function buildPartsRouter(pool) {
   // ================================================================
   // 4. 配件入库
   // ================================================================
-  router.post('/stock-in', async (req, res) => {
+  router.post('/stock-in', tenantMiddleware, async (req, res) => {
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
@@ -220,7 +221,7 @@ export default function buildPartsRouter(pool) {
   // ================================================================
   // 5. 配件领用（待核销，不扣库存）
   // ================================================================
-  router.post('/use', async (req, res) => {
+  router.post('/use', tenantMiddleware, async (req, res) => {
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
@@ -272,7 +273,7 @@ export default function buildPartsRouter(pool) {
   // ================================================================
   // 6. 配件退回
   // ================================================================
-  router.post('/return', async (req, res) => {
+  router.post('/return', tenantMiddleware, async (req, res) => {
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
@@ -317,7 +318,7 @@ export default function buildPartsRouter(pool) {
   // ================================================================
   // 7. 配件报废
   // ================================================================
-  router.post('/scrap', async (req, res) => {
+  router.post('/scrap', tenantMiddleware, async (req, res) => {
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
@@ -371,7 +372,7 @@ export default function buildPartsRouter(pool) {
   // ================================================================
   // 8. 更新配件信息
   // ================================================================
-  router.put('/:id', async (req, res) => {
+  router.put('/:id', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
       const data = keysToSnakeCase(req.body);
@@ -398,7 +399,7 @@ export default function buildPartsRouter(pool) {
   // ================================================================
   // 9. 删除配件（软删除）
   // ================================================================
-  router.delete('/:id', async (req, res) => {
+  router.delete('/:id', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
       
@@ -427,7 +428,7 @@ export default function buildPartsRouter(pool) {
   // ================================================================
   // 10. 获取所有配件的出入库记录
   // ================================================================
-  router.get('/transactions/all', async (req, res) => {
+  router.get('/transactions/all', tenantMiddleware, async (req, res) => {
     try {
       // 一户一库，不需要租户过滤
       const query = `
@@ -460,7 +461,7 @@ export default function buildPartsRouter(pool) {
   // ================================================================
   // 11. 获取单个配件的出入库记录
   // ================================================================
-  router.get('/:id/transactions', async (req, res) => {
+  router.get('/:id/transactions', tenantMiddleware, async (req, res) => {
     try {
       const { id} = req.params;
       
@@ -486,7 +487,7 @@ export default function buildPartsRouter(pool) {
   // ================================================================
   // 12. 获取待核销配件列表
   // ================================================================
-  router.get('/pending-writeoffs/list', async (req, res) => {
+  router.get('/pending-writeoffs/list', tenantMiddleware, async (req, res) => {
     try {
       // 一户一库，不需要租户过滤
       const query = `
@@ -536,7 +537,7 @@ export default function buildPartsRouter(pool) {
   // ================================================================
   // 13. 配件核销
   // ================================================================
-  router.post('/write-off', async (req, res) => {
+  router.post('/write-off', tenantMiddleware, async (req, res) => {
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
@@ -647,7 +648,7 @@ export default function buildPartsRouter(pool) {
   // ================================================================
   // 14. 退回待核销配件
   // ================================================================
-  router.post('/return-pending', async (req, res) => {
+  router.post('/return-pending', tenantMiddleware, async (req, res) => {
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();

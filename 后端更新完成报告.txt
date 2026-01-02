@@ -1,0 +1,163 @@
+===============================================
+  财务表合并 - 后端代码修改完成报告
+===============================================
+
+✅ 已完成的修改：
+
+1. ✅ server/routes/orders.mysql.js
+   - 添加了 financeService 导入
+   - 修改了 15 处 order_receipts/order_refunds 引用
+   - 所有查询改为使用 finance_records 表
+   - 字段映射：receipt_date → record_date, refund_date → record_date
+   - 添加了 WHERE record_type = 'receipt'/'refund' 条件
+
+   修改位置：
+   ├─ 行 66-73：仪表板统计查询（LEFT JOIN）
+   ├─ 行 121-122：COUNT 查询
+   ├─ 行 351-352：SUM 查询
+   ├─ 行 489-492：SELECT 收款记录
+   ├─ 行 524-526：SELECT 退款记录
+   ├─ 行 1199：DELETE 财务记录（订单删除时）
+   ├─ 行 2067-2093：查询和删除收款记录
+   └─ 行 2250-2276：查询和删除退款记录
+
+2. ✅ server/routes/dashboard.mysql.js
+   - 修改了 2 处 order_receipts 引用
+   - 所有查询改为使用 finance_records 表
+   - 字段映射：receipt_date → record_date
+   - 添加了 WHERE record_type = 'receipt' 条件
+
+   修改位置：
+   ├─ 行 76-84：本月实收金额统计
+   └─ 行 172-180：实收趋势查询
+
+3. ✅ server/services/financeService.js（新建）
+   - 创建了统一的财务记录服务层
+   - 包含收款/退款的 CRUD 操作
+   - 自动处理字段映射和 record_type 过滤
+   - 提供统计和汇总功能
+
+===============================================
+
+⚠️ 需要特殊处理的文件：
+
+❗ server/routes/payments.mysql.js
+   
+   问题说明：
+   该文件使用 order_receipts 表实现收款管理功能，包含大量业务字段：
+   - status (pending/approved/rejected/voided) - 审核状态
+   - type (deposit/rent/transport/claim/other) - 收款类型
+   - payer_name - 付款人
+   - bank_account - 银行账号
+   - transaction_id - 交易号
+   - received_by - 经手人
+   - audited_by - 审核人
+   - audited_at - 审核时间
+   - audit_notes - 审核备注
+   - void_reason - 作废原因
+   - voided_by - 作废操作人
+   - voided_at - 作废时间
+
+   这些字段在当前的 finance_records 表中可能不存在。
+
+   解决方案（请选择）：
+
+   方案A：保留 order_receipts 表用于收款管理
+   - 优点：无需修改代码，保持现有功能完整
+   - 缺点：数据库中会有两个收款相关的表
+   - 适用：如果 payments 是独立的收款审核系统
+
+   方案B：扩展 finance_records 表结构
+   - 在 finance_records 表中添加缺失的字段
+   - 修改 payments.mysql.js 使用 finance_records
+   - 优点：统一财务数据存储
+   - 缺点：需要数据库迁移和代码改动
+
+   方案C：payments 功能迁移到 finance_records
+   - 将审核流程、收款类型等信息存储在 attachments_json 中
+   - 简化 finance_records 核心字段
+   - 优点：灵活，易于扩展
+   - 缺点：查询复杂，需要解析 JSON
+
+===============================================
+
+📋 测试建议：
+
+1. 重启后端服务：
+   npm run api
+
+2. 测试订单管理：
+   - 查看订单列表（财务统计是否正确）
+   - 查看订单详情（收款/退款记录显示）
+   - 创建收款记录
+   - 创建退款记录
+   - 删除收款/退款记录
+   - 删除订单（级联删除财务记录）
+
+3. 测试仪表板：
+   - 查看KPI统计（本月实收金额）
+   - 查看趋势图表（收款趋势）
+
+4. 检查数据一致性：
+   - 订单列表中的实收金额
+   - 订单详情中的收款/退款汇总
+   - 仪表板中的财务统计
+
+===============================================
+
+🔍 数据库检查：
+
+执行以下SQL确认数据迁移正确：
+
+-- 1. 检查 finance_records 表数据量
+SELECT record_type, COUNT(*) as count, SUM(amount) as total 
+FROM finance_records 
+GROUP BY record_type;
+
+-- 2. 检查旧表是否还有数据（应该为空或已删除）
+SELECT COUNT(*) FROM order_receipts;  -- 可能会报错：表不存在
+SELECT COUNT(*) FROM order_refunds;   -- 可能会报错：表不存在
+
+-- 3. 验证字段映射
+SELECT id, record_number, record_type, order_id, amount, record_date, remark 
+FROM finance_records 
+LIMIT 10;
+
+===============================================
+
+💾 备份建议：
+
+如果发现问题，可以从备份表恢复：
+- order_receipts_backup
+- order_refunds_backup
+
+恢复命令（谨慎使用）：
+-- 恢复收款记录
+INSERT INTO order_receipts SELECT * FROM order_receipts_backup;
+
+-- 恢复退款记录  
+INSERT INTO order_refunds SELECT * FROM order_refunds_backup;
+
+===============================================
+
+📞 后续支持：
+
+如果遇到问题：
+1. 检查浏览器控制台错误
+2. 检查后端日志（npm run api 的输出）
+3. 确认数据库表结构和数据
+4. 使用 财务表合并-后端修改清单.txt 核对修改点
+
+===============================================
+
+✨ 下一步：
+
+请测试上述功能，并告知：
+1. 是否有报错或异常
+2. 数据显示是否正确
+3. 对于 payments.mysql.js，您希望采用哪个方案
+
+===============================================
+生成时间：2026-01-02
+版本：1.0
+

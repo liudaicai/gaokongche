@@ -379,6 +379,9 @@ const EntryOperationTab: React.FC<Props> = ({ order, tabKey }) => {
         
         // 更新订单的在租设备列表和进场附件
         // ⚠️ 关键修复：必须保留 equipmentItems，否则后端会清空设备需求
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/ea6be235-0d47-4460-9a53-426650f4adda',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'EntryOperationTab.tsx:382',message:'Before creating updatedBase',data:{effectiveOrderId:effectiveOrder.id,hasProjectName:!!effectiveOrder.projectName,hasCustomerName:!!effectiveOrder.customerName,hasContractNumber:!!effectiveOrder.contractNumber,projectName:effectiveOrder.projectName,customerName:effectiveOrder.customerName,contractNumber:effectiveOrder.contractNumber},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
         const updatedBase = {
           ...effectiveOrder,
           rentedEquipmentIds: updatedRented,
@@ -387,6 +390,9 @@ const EntryOperationTab: React.FC<Props> = ({ order, tabKey }) => {
           entries: undefined, // 不传entries，避免后端清空重建
           exits: undefined,   // 不传exits，避免后端清空重建
         } as any;
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/ea6be235-0d47-4460-9a53-426650f4adda',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'EntryOperationTab.tsx:390',message:'After creating updatedBase',data:{updatedBaseId:updatedBase.id,hasProjectName:!!updatedBase.projectName,hasCustomerName:!!updatedBase.customerName,hasContractNumber:!!updatedBase.contractNumber,projectName:updatedBase.projectName,customerName:updatedBase.customerName,contractNumber:updatedBase.contractNumber},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
         await dispatch(updateOrder(updatedBase)).unwrap();
         console.log('✅ 订单在租设备列表已更新:', updatedRented);
 

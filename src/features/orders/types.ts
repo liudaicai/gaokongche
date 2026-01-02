@@ -94,6 +94,17 @@ export interface EntryRecord {
   attachments?: Array<{ uid: string; name: string; type?: string; size?: number }>;
   // 🆕 替代设备信息：记录高度高于需求的设备，key为设备编码
   substituteEquipments?: Record<string, { requiredHeight: number; actualHeight: number }>;
+  // 设备详情：包含设备的完整信息（code, customCode, type, model, brand, height等）
+  equipmentDetails?: Array<{
+    code: string;
+    customCode?: string;
+    type?: string;
+    model?: string;
+    brand?: string;
+    height?: string | number;
+    equipmentId?: string | number;
+    id?: string | number;
+  }>;
   vehicleId?: string;
   driverId?: string;
   companyId?: string;

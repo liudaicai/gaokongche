@@ -248,6 +248,23 @@ const FinanceManagement: React.FC = () => {
       }
     },
     {
+      title: '类型',
+      dataIndex: 'record_type',
+      key: 'record_type',
+      width: 80,
+      render: (type: string) => {
+        if (activeTab === 'receipts') {
+          return <Tag color="green">收款</Tag>;
+        } else {
+          // 付款标签页可能包含 payment 和 refund
+          if (type === 'refund') {
+            return <Tag color="orange">退款</Tag>;
+          }
+          return <Tag color="blue">付款</Tag>;
+        }
+      }
+    },
+    {
       title: '来源',
       dataIndex: 'is_from_order',
       key: 'is_from_order',

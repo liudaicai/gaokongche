@@ -1,14 +1,16 @@
 /**
  * 收款管理API
  * 收款登记、收据打印、财务审核
+ * ✅ 多租户支持：通过 tenantMiddleware 自动过滤 company_id
  */
 
 import express from 'express';
+import { tenantMiddleware, setTenantId, buildWhereClause } from '../middleware/tenant.js';
 export default function buildPaymentsRouter(pool) {
   const router = express.Router();
 
   // ==================== 1. 收款记录列表 ====================
-  router.get('/', async (req, res) => {
+  router.get('/', tenantMiddleware, async (req, res) => {
     try {
       const page = Number(req.query.page) || 1;
       const pageSize = Number(req.query.pageSize) || 20;
@@ -17,10 +19,10 @@ export default function buildPaymentsRouter(pool) {
       const paymentType = req.query.type || '';
       const status = req.query.status || '';
       
-      let whereClause = 'WHERE 1=1';
-      const params = [];
-
-      // 不再检查 company_id（多租户已移除）
+      // ✅ 多租户过滤
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+      let whereClause = `WHERE o.${tenantWhere}`;
+      const params = [...tenantParams];
       
       if (orderId) {
         whereClause += ' AND r.order_id = ?';
@@ -45,7 +47,7 @@ export default function buildPaymentsRouter(pool) {
       const [rows] = await pool.query(
         `SELECT r.*, o.contract_number, c.name as customer_name
          FROM order_receipts r
-         LEFT JOIN orders o ON r.order_id = o.id
+         INNER JOIN orders o ON r.order_id = o.id
          LEFT JOIN customers c ON o.customer_id = c.id
          ${whereClause}
          ORDER BY r.receipt_date DESC, r.created_at DESC

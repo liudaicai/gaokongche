@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Tree, Button, Space, message, Checkbox } from 'antd';
+import { Tree, Button, Space, App, Checkbox } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import type { Permission } from './types';
 
@@ -22,6 +22,7 @@ const PermissionTree: React.FC<PermissionTreeProps> = ({
   onSave,
   onClose,
 }) => {
+  const { message } = App.useApp();
   const [localCheckedKeys, setLocalCheckedKeys] = useState<number[]>(checkedKeys);
   const [allChecked, setAllChecked] = useState(false);
   const [saving, setSaving] = useState(false);

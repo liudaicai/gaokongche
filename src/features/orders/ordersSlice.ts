@@ -31,24 +31,24 @@ export const fetchOrders = createAsyncThunk(
       }
       const orders: Order[] = data.map((o: any) => ({
         id: String(o.id ?? ''),
-        contractNumber: o.contract_number ?? '',
-        lessorId: o.lessor_id ? String(o.lessor_id) : '',
-        lessorCompanyId: o.lessor_company_id ? String(o.lessor_company_id) : '',  // 添加对 lessor_company_id 的支持
-        lessorName: o.lessor_name ?? o.vendor_name ?? '',
-        customerId: o.customer_id ? String(o.customer_id) : '',
-        customerName: o.customer_name ?? '',
-        projectName: o.project_name ?? '',
-        businessManagerId: o.business_manager_id ? String(o.business_manager_id) : '',
-        businessManagerName: o.business_manager_name ?? '',
-        monthCalculationMethod: o.month_calculation_method ?? '30天为一月',
-        paymentAgreement: o.payment_agreement ?? '预付',
-        shippingFeeReduction: o.shipping_fee_reduction ?? '无减免',
-        shippingFeeCalculation: o.shipping_fee_calculation ?? '按台计费',
-        isTaxInvoice: o.is_tax_invoice ?? '不开票',
-        invoiceTaxRate: o.invoice_tax_rate ?? undefined,
-        constructionCategory: o.construction_category ?? '其他',
-        deliveryLocation: o.delivery_location ?? '',
-        otherAgreements: o.other_agreements ?? '',
+        contractNumber: o.contractNumber ?? o.contract_number ?? '',
+        lessorId: o.lessorId ?? o.lessor_id ? String(o.lessorId ?? o.lessor_id) : '',
+        lessorCompanyId: o.lessorCompanyId ?? o.lessor_company_id ? String(o.lessorCompanyId ?? o.lessor_company_id) : '',
+        lessorName: o.lessorName ?? o.lessor_name ?? o.vendor_name ?? '',
+        customerId: o.customerId ?? o.customer_id ? String(o.customerId ?? o.customer_id) : '',
+        customerName: o.customerName ?? o.customer_name ?? '',
+        projectName: o.projectName ?? o.project_name ?? '',
+        businessManagerId: o.businessManagerId ?? o.business_manager_id ? String(o.businessManagerId ?? o.business_manager_id) : '',
+        businessManagerName: o.businessManagerName ?? o.business_manager_name ?? '',
+        monthCalculationMethod: o.monthCalculationMethod ?? o.month_calculation_method ?? '30天为一月',
+        paymentAgreement: o.paymentAgreement ?? o.payment_agreement ?? '预付',
+        shippingFeeReduction: o.shippingFeeReduction ?? o.shipping_fee_reduction ?? '无减免',
+        shippingFeeCalculation: o.shippingFeeCalculation ?? o.shipping_fee_calculation ?? '按台计费',
+        isTaxInvoice: o.isTaxInvoice ?? o.is_tax_invoice ?? '不开票',
+        invoiceTaxRate: o.invoiceTaxRate ?? o.invoice_tax_rate ?? undefined,
+        constructionCategory: o.constructionCategory ?? o.construction_category ?? '其他',
+        deliveryLocation: o.deliveryLocation ?? o.delivery_location ?? '',
+        otherAgreements: o.otherAgreements ?? o.other_agreements ?? '',
         equipmentItems: (o.equipmentItems || o.equipment_items || []).map((it: any) => ({
           id: String(it.id ?? ''),
           equipmentType: it.equipmentType ?? it.equipment_type ?? '',
@@ -65,7 +65,7 @@ export const fetchOrders = createAsyncThunk(
           shippingType: it.shippingType ?? it.shipping_type ?? '双程',
         })),
         rentedEquipmentIds: normalizeRented(o.rentedEquipmentIds ?? o.rented_equipment_ids),
-        estimatedAmount: Number(o.estimated_amount ?? 0),
+        estimatedAmount: Number(o.estimatedAmount ?? o.estimated_amount ?? 0),
         receipts: undefined,
         suspensions: undefined,
         claims: undefined,
@@ -204,7 +204,7 @@ export const addOrder = createAsyncThunk(
           shippingType: it.shippingType ?? (it.shipping_type ? (String(it.shipping_type) === '单程' ? '单程' : '双程') : '双程'),
         })),
         rentedEquipmentIds: normalizeRented(d.rentedEquipmentIds ?? d.rented_equipment_ids),
-        estimatedAmount: Number(d.estimated_amount ?? 0),
+        estimatedAmount: Number(d.estimatedAmount ?? d.estimated_amount ?? 0),
         receipts: d.receipts ?? undefined,
         refunds: d.refunds ?? undefined,
         suspensions: d.suspensions ?? undefined,
@@ -240,6 +240,9 @@ export const updateOrder = createAsyncThunk(
   'orders/updateOrder',
   async (updatedOrder: Order, { rejectWithValue }) => {
     try {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/ea6be235-0d47-4460-9a53-426650f4adda',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ordersSlice.ts:241',message:'updateOrder called',data:{orderId:updatedOrder.id,hasProjectName:!!updatedOrder.projectName,hasCustomerName:!!updatedOrder.customerName,hasContractNumber:!!updatedOrder.contractNumber,projectName:updatedOrder.projectName,customerName:updatedOrder.customerName,contractNumber:updatedOrder.contractNumber},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
       // 调用后端更新订单基础信息（状态/附件/在租设备等）
       await apiPut(`/orders/${updatedOrder.id}`, {
           contract_number: updatedOrder.contractNumber,
@@ -269,6 +272,9 @@ export const updateOrder = createAsyncThunk(
           estimatedAmount: updatedOrder.estimatedAmount,
           creationDate: updatedOrder.creationDate,
         });
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/ea6be235-0d47-4460-9a53-426650f4adda',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ordersSlice.ts:272',message:'updateOrder returning',data:{orderId:updatedOrder.id,hasProjectName:!!updatedOrder.projectName,hasCustomerName:!!updatedOrder.customerName,hasContractNumber:!!updatedOrder.contractNumber,projectName:updatedOrder.projectName,customerName:updatedOrder.customerName,contractNumber:updatedOrder.contractNumber},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
       return updatedOrder;
     } catch (error) {
       return rejectWithValue('更新订单失败');
@@ -308,8 +314,11 @@ export const addExit = createAsyncThunk(
     try {
       const response = await apiPost<{ id: number }>(`/orders/${orderId}/exits`, record);
       return { orderId, record: { ...record, id: String(response.id) } };
-    } catch (error) {
-      return rejectWithValue('添加退场记录失败');
+    } catch (error: any) {
+      // 传递详细的错误信息
+      const errorMessage = error?.message || '添加退场记录失败';
+      console.error('[OrdersSlice] 添加退场记录失败:', errorMessage);
+      return rejectWithValue(errorMessage);
     }
   }
 );
@@ -504,24 +513,24 @@ export const fetchOrderById = createAsyncThunk(
       };
       const order: Order = {
         id: String(d.id ?? orderId),
-        contractNumber: d.contract_number ?? '',
-        lessorId: d.lessor_id ? String(d.lessor_id) : '',
-        lessorCompanyId: d.lessor_company_id ? String(d.lessor_company_id) : '',  // 添加对 lessor_company_id 的支持
-        lessorName: d.lessor_name ?? d.vendor_name ?? '',
-        customerId: d.customer_id ? String(d.customer_id) : '',
-        customerName: d.customer_name ?? '',
-        projectName: d.project_name ?? '',
-        businessManagerId: d.business_manager_id ? String(d.business_manager_id) : '',
-        businessManagerName: d.business_manager_name ?? '',
-        monthCalculationMethod: d.month_calculation_method ?? '30天为一月',
-        paymentAgreement: d.payment_agreement ?? '预付',
-        shippingFeeReduction: d.shipping_fee_reduction ?? '无减免',
-        shippingFeeCalculation: d.shipping_fee_calculation ?? '按台计费',
-        isTaxInvoice: d.is_tax_invoice ?? '不开票',
-        invoiceTaxRate: d.invoice_tax_rate ?? undefined,
-        constructionCategory: d.construction_category ?? '其他',
-        deliveryLocation: d.delivery_location ?? '',
-        otherAgreements: d.other_agreements ?? '',
+        contractNumber: d.contractNumber ?? d.contract_number ?? '',
+        lessorId: d.lessorId ?? d.lessor_id ? String(d.lessorId ?? d.lessor_id) : '',
+        lessorCompanyId: d.lessorCompanyId ?? d.lessor_company_id ? String(d.lessorCompanyId ?? d.lessor_company_id) : '',
+        lessorName: d.lessorName ?? d.lessor_name ?? d.vendor_name ?? '',
+        customerId: d.customerId ?? d.customer_id ? String(d.customerId ?? d.customer_id) : '',
+        customerName: d.customerName ?? d.customer_name ?? '',
+        projectName: d.projectName ?? d.project_name ?? '',
+        businessManagerId: d.businessManagerId ?? d.business_manager_id ? String(d.businessManagerId ?? d.business_manager_id) : '',
+        businessManagerName: d.businessManagerName ?? d.business_manager_name ?? '',
+        monthCalculationMethod: d.monthCalculationMethod ?? d.month_calculation_method ?? '30天为一月',
+        paymentAgreement: d.paymentAgreement ?? d.payment_agreement ?? '预付',
+        shippingFeeReduction: d.shippingFeeReduction ?? d.shipping_fee_reduction ?? '无减免',
+        shippingFeeCalculation: d.shippingFeeCalculation ?? d.shipping_fee_calculation ?? '按台计费',
+        isTaxInvoice: d.isTaxInvoice ?? d.is_tax_invoice ?? '不开票',
+        invoiceTaxRate: d.invoiceTaxRate ?? d.invoice_tax_rate ?? undefined,
+        constructionCategory: d.constructionCategory ?? d.construction_category ?? '其他',
+        deliveryLocation: d.deliveryLocation ?? d.delivery_location ?? '',
+        otherAgreements: d.otherAgreements ?? d.other_agreements ?? '',
         equipmentItems: (d.equipmentItems || d.equipment_items || []).map((it: any) => ({
           id: String(it.id ?? ''),
           equipmentType: it.equipmentType ?? it.equipment_type ?? '',
@@ -538,7 +547,7 @@ export const fetchOrderById = createAsyncThunk(
           shippingType: it.shippingType ?? (it.shipping_type ? (String(it.shipping_type) === '单程' ? '单程' : '双程') : '双程'),
         })),
         rentedEquipmentIds: normalizeRented(d.rentedEquipmentIds ?? d.rented_equipment_ids),
-        estimatedAmount: Number(d.estimated_amount ?? 0),
+        estimatedAmount: Number(d.estimatedAmount ?? d.estimated_amount ?? 0),
         receipts: d.receipts ?? undefined,
         refunds: d.refunds ?? undefined,
         suspensions: d.suspensions ?? undefined,
@@ -628,7 +637,13 @@ export const ordersSlice = createSlice({
       state.loading = false;
       const index = state.orders.findIndex((o) => o.id === action.payload.id);
       if (index !== -1) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/ea6be235-0d47-4460-9a53-426650f4adda',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ordersSlice.ts:631',message:'Before updateOrder.fulfilled',data:{orderId:action.payload.id,oldProjectName:state.orders[index].projectName,oldCustomerName:state.orders[index].customerName,oldContractNumber:state.orders[index].contractNumber,newProjectName:action.payload.projectName,newCustomerName:action.payload.customerName,newContractNumber:action.payload.contractNumber},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
         state.orders[index] = action.payload;
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/ea6be235-0d47-4460-9a53-426650f4adda',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ordersSlice.ts:633',message:'After updateOrder.fulfilled',data:{orderId:action.payload.id,currentProjectName:state.orders[index].projectName,currentCustomerName:state.orders[index].customerName,currentContractNumber:state.orders[index].contractNumber},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
       }
     });
     builder.addCase(updateOrder.rejected, (state, action) => {

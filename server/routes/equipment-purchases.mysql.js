@@ -1,4 +1,5 @@
 import express from 'express';
+import { tenantMiddleware } from '../middleware/tenant.js';
 
 function buildEquipmentPurchasesRouter(pool) {
   const router = express.Router();
@@ -20,14 +21,18 @@ function buildEquipmentPurchasesRouter(pool) {
     return result;
   }
 
-  // 单租户模式：始终使用默认公司ID
+  // ✅ 多租户模式：从当前用户获取company_id
   function getCompanyId(req, body = {}) {
-    // 单租户模式下，所有数据都属于同一个公司（ID为1）
-    return 1;
+    // 从req.user中获取company_id（由authMiddleware设置）
+    // 超级管理员可以通过body.companyId指定
+    if (req.user?.role === 'super_admin' || req.user?.role === 'superadmin') {
+      return body.companyId || req.user.company_id || 1;
+    }
+    return req.user?.company_id || 1;
   }
 
   // 获取采购记录列表
-  router.get('/', async (req, res) => {
+  router.get('/', tenantMiddleware, async (req, res) => {
     try {
       const {
         page = 1,
@@ -42,9 +47,12 @@ function buildEquipmentPurchasesRouter(pool) {
       const offset = (parseInt(page) - 1) * parseInt(pageSize);
       const limit = parseInt(pageSize);
 
-      // 构建查询条件（单租户模式：所有数据属于同一公司）
-      let whereConditions = ['ep.is_deleted = FALSE'];
-      const params = [];
+      // ✅ 多租户过滤
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+
+      // 构建查询条件
+      let whereConditions = ['ep.is_deleted = FALSE', `ep.${tenantWhere}`];
+      const params = [...tenantParams];
 
       if (manufacturerName) {
         whereConditions.push('ep.manufacturer_name LIKE ?');
@@ -155,11 +163,14 @@ function buildEquipmentPurchasesRouter(pool) {
   });
 
   // 获取单个采购记录（包含明细）
-  router.get('/:id', async (req, res) => {
+  router.get('/:id', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
 
-      // 查询主表（单租户模式）
+      // ✅ 多租户过滤
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+
+      // 查询主表
       const query = `SELECT 
         ep.*,
         u1.name AS creator_name,
@@ -167,9 +178,9 @@ function buildEquipmentPurchasesRouter(pool) {
       FROM equipment_purchases ep
       LEFT JOIN users u1 ON ep.created_by = u1.id
       LEFT JOIN users u2 ON ep.updated_by = u2.id
-      WHERE ep.id = ? AND ep.is_deleted = FALSE`;
+      WHERE ep.id = ? AND ep.is_deleted = FALSE AND ep.${tenantWhere}`;
       
-      const [[purchase]] = await pool.query(query, [id]);
+      const [[purchase]] = await pool.query(query, [id, ...tenantParams]);
 
       if (!purchase) {
         return res.json({ ok: false, error: '采购记录不存在' });
@@ -212,7 +223,7 @@ function buildEquipmentPurchasesRouter(pool) {
   });
 
   // 创建采购记录
-  router.post('/', async (req, res) => {
+  router.post('/', tenantMiddleware, async (req, res) => {
     const connection = await pool.getConnection();
     try {
       console.log('[Purchases] 开始创建采购记录，请求体:', JSON.stringify(req.body).substring(0, 200));
@@ -378,7 +389,7 @@ function buildEquipmentPurchasesRouter(pool) {
   });
 
   // 更新采购记录
-  router.put('/:id', async (req, res) => {
+  router.put('/:id', tenantMiddleware, async (req, res) => {
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
@@ -410,10 +421,13 @@ function buildEquipmentPurchasesRouter(pool) {
 
       const userId = req.user?.id;
 
-      // 检查记录是否存在（单租户模式）
+      // ✅ 多租户过滤
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+
+      // 检查记录是否存在
       const [[existing]] = await connection.query(
-        'SELECT id, company_id FROM equipment_purchases WHERE id = ? AND is_deleted = FALSE',
-        [id]
+        `SELECT id, company_id FROM equipment_purchases WHERE id = ? AND is_deleted = FALSE AND ${tenantWhere}`,
+        [id, ...tenantParams]
       );
 
       if (!existing) {
@@ -600,16 +614,19 @@ function buildEquipmentPurchasesRouter(pool) {
   });
 
   // 删除采购记录（软删除）
-  router.delete('/:id', async (req, res) => {
+  router.delete('/:id', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
 
-      // 软删除采购记录（单租户模式）
+      // ✅ 多租户过滤
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+
+      // 软删除采购记录
       await pool.query(
         `UPDATE equipment_purchases 
          SET is_deleted = TRUE, deleted_at = NOW() 
-         WHERE id = ?`,
-        [id]
+         WHERE id = ? AND ${tenantWhere}`,
+        [id, ...tenantParams]
       );
 
       res.json({ ok: true });
@@ -620,20 +637,23 @@ function buildEquipmentPurchasesRouter(pool) {
   });
 
   // 获取统计数据
-  router.get('/stats/summary', async (req, res) => {
+  router.get('/stats/summary', tenantMiddleware, async (req, res) => {
     try {
-      // 单租户模式：查询所有统计数据
+      // ✅ 多租户过滤
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+
+      // 查询统计数据
       const query = `SELECT 
         SUM(total_purchases) as totalPurchases,
         SUM(total_quantity) as totalQuantity,
         SUM(total_amount) as totalAmount,
         SUM(total_with_tax) as totalWithTax,
         SUM(cash_amount) as cashAmount,
-        SUM(financing_amount) as financingAmount,
-        COUNT(DISTINCT manufacturer_name) as manufacturerCount
-      FROM v_purchase_statistics`;
+        SUM(financing_amount) as financingAmount
+      FROM v_purchase_statistics
+      WHERE ${tenantWhere}`;
       
-      const [[stats]] = await pool.query(query);
+      const [[stats]] = await pool.query(query, tenantParams);
 
       res.json({
         ok: true,
@@ -654,7 +674,7 @@ function buildEquipmentPurchasesRouter(pool) {
   });
 
   // 获取当月应还款统计
-  router.get('/repayments/monthly-summary', async (req, res) => {
+  router.get('/repayments/monthly-summary', tenantMiddleware, async (req, res) => {
     try {
       const year = req.query.year || new Date().getFullYear();
       const month = req.query.month || new Date().getMonth() + 1;
@@ -704,7 +724,7 @@ function buildEquipmentPurchasesRouter(pool) {
   });
 
   // 记录还款
-  router.post('/:id/repayment', async (req, res) => {
+  router.post('/:id/repayment', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
       const { year, month, actualAmount, repaymentDate, remark } = req.body;
@@ -714,10 +734,13 @@ function buildEquipmentPurchasesRouter(pool) {
         return res.json({ ok: false, error: '缺少必填字段' });
       }
 
-      // 查询采购记录（单租户模式）
+      // ✅ 多租户过滤
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+
+      // 查询采购记录
       const [[purchase]] = await pool.query(
-        'SELECT id, company_id, monthly_payment FROM equipment_purchases WHERE id = ? AND is_deleted = FALSE',
-        [id]
+        `SELECT id, company_id, monthly_payment FROM equipment_purchases WHERE id = ? AND is_deleted = FALSE AND ${tenantWhere}`,
+        [id, ...tenantParams]
       );
 
       if (!purchase) {
@@ -747,14 +770,17 @@ function buildEquipmentPurchasesRouter(pool) {
   });
 
   // 获取采购单的还款记录列表
-  router.get('/:id/repayments', async (req, res) => {
+  router.get('/:id/repayments', tenantMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
 
-      // 查询采购记录（单租户模式）
+      // ✅ 多租户过滤
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+
+      // 查询采购记录
       const [[purchase]] = await pool.query(
-        'SELECT id, company_id FROM equipment_purchases WHERE id = ? AND is_deleted = FALSE',
-        [id]
+        `SELECT id, company_id FROM equipment_purchases WHERE id = ? AND is_deleted = FALSE AND ${tenantWhere}`,
+        [id, ...tenantParams]
       );
 
       if (!purchase) {
@@ -783,7 +809,7 @@ function buildEquipmentPurchasesRouter(pool) {
   });
 
   // 获取厂家列表（用于下拉选择）
-  router.get('/manufacturers/list', async (req, res) => {
+  router.get('/manufacturers/list', tenantMiddleware, async (req, res) => {
     try {
       // 单租户模式：返回所有厂家列表
       const query = `SELECT DISTINCT manufacturer_name 

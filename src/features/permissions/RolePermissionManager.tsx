@@ -7,7 +7,7 @@ import {
   Modal,
   Form,
   Input,
-  message,
+  App,
   Tag,
   Popconfirm,
 } from 'antd';
@@ -18,6 +18,7 @@ import PermissionTree from './PermissionTree';
 import type { RolePermission, Permission } from './types';
 
 const RolePermissionManager: React.FC = () => {
+  const { message } = App.useApp();
   const [form] = Form.useForm();
   const [roles, setRoles] = useState<RolePermission[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
@@ -36,7 +37,7 @@ const RolePermissionManager: React.FC = () => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const response = await apiClient.get('/api/permissions/roles');
+      const response = await apiClient.get('/permissions/roles');
       if (response.data.ok) {
         setRoles(response.data.data);
       }
@@ -49,7 +50,7 @@ const RolePermissionManager: React.FC = () => {
 
   const loadPermissions = async () => {
     try {
-      const response = await apiClient.get('/api/permissions/definitions');
+      const response = await apiClient.get('/permissions/definitions');
       if (response.data.ok) {
         setPermissions(response.data.data);
       }
@@ -83,7 +84,7 @@ const RolePermissionManager: React.FC = () => {
 
   const handleDelete = async (roleCode: string) => {
     try {
-      const response = await apiClient.delete(`/api/permissions/roles/${roleCode}`);
+      const response = await apiClient.delete(`/permissions/roles/${roleCode}`);
       if (response.data.ok) {
         message.success('删除成功');
         loadData();
@@ -105,7 +106,7 @@ const RolePermissionManager: React.FC = () => {
       }
 
       const roleCode = isEditing ? currentRole!.roleCode : values.roleCode;
-      const response = await apiClient.post(`/api/permissions/roles/${roleCode}`, {
+      const response = await apiClient.post(`/permissions/roles/${roleCode}`, {
         roleName: values.roleName,
         permissionIds: isEditing ? currentRole!.permissionIds : [],
       });
@@ -127,7 +128,7 @@ const RolePermissionManager: React.FC = () => {
     if (!currentRole) return;
 
     const response = await apiClient.post(
-      `/api/permissions/roles/${currentRole.roleCode}`,
+      `/permissions/roles/${currentRole.roleCode}`,
       {
         roleName: currentRole.roleName,
         permissionIds: checkedKeys,
@@ -267,7 +268,7 @@ const RolePermissionManager: React.FC = () => {
         onCancel={() => setPermissionModalVisible(false)}
         footer={null}
         width={900}
-        bodyStyle={{ height: '70vh', padding: 0 }}
+        styles={{ body: { height: '70vh', padding: 0 } }}
       >
         <PermissionTree
           permissions={permissions}

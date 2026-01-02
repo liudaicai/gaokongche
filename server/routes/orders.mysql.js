@@ -1,38 +1,45 @@
 import express from 'express';
 import { createAuditLog, AuditAction } from '../utils/auditLog.js';
+import { tenantMiddleware, setTenantId, buildWhereClause } from '../middleware/tenant.js';
+import FinanceService from '../services/financeService.js';
 
 const toDto = (row) => ({
   id: String(row.id),
-  contract_number: row.contract_number,
-  lessor_id: row.lessor_id ? String(row.lessor_id) : undefined,
-  lessor_company_id: row.lessor_company_id ? String(row.lessor_company_id) : undefined,  // 添加对 lessor_company_id 的支持
-  lessor_name: row.lessor_name || row.lessor_company_name || undefined,  // 优先使用公司名称
-  customer_id: row.customer_id ? String(row.customer_id) : undefined,
-  customer_name: row.customer_name || undefined,
-  project_name: row.project_name || undefined,
-  business_manager_id: row.business_manager_id ? String(row.business_manager_id) : undefined,
-  business_manager_name: row.business_manager_name || undefined,
-  month_calculation_method: row.month_calculation_method || undefined,
-  delivery_location: row.delivery_location || undefined,
-  payment_agreement: row.payment_agreement || undefined,
-  shipping_fee_reduction: row.shipping_fee_reduction || undefined,
-  shipping_fee_calculation: row.shipping_fee_calculation || undefined,
-  is_tax_invoice: row.is_tax_invoice || undefined,
-  invoice_tax_rate: row.invoice_tax_rate || undefined,
-  construction_category: row.construction_category || undefined,
-  other_agreements: row.other_agreements || undefined,
+  contractNumber: row.contract_number,
+  lessorId: row.lessor_id ? String(row.lessor_id) : undefined,
+  lessorCompanyId: row.lessor_company_id ? String(row.lessor_company_id) : undefined,  // 添加对 lessor_company_id 的支持
+  lessorName: row.lessor_name || row.lessor_company_name || undefined,  // 优先使用公司名称
+  customerId: row.customer_id ? String(row.customer_id) : undefined,
+  customerName: row.customer_name || undefined,
+  projectName: row.project_name || undefined,
+  businessManagerId: row.business_manager_id ? String(row.business_manager_id) : undefined,
+  businessManagerName: row.business_manager_name || undefined,
+  monthCalculationMethod: row.month_calculation_method || undefined,
+  deliveryLocation: row.delivery_location || undefined,
+  paymentAgreement: row.payment_agreement || undefined,
+  shippingFeeReduction: row.shipping_fee_reduction || undefined,
+  shippingFeeCalculation: row.shipping_fee_calculation || undefined,
+  isTaxInvoice: row.is_tax_invoice || undefined,
+  invoiceTaxRate: row.invoice_tax_rate || undefined,
+  constructionCategory: row.construction_category || undefined,
+  otherAgreements: row.other_agreements || undefined,
   attachments: [],
-  rented_equipment_ids: [],
+  rentedEquipmentIds: [],
   createdAt: row.created_at?.toISOString?.() || row.created_at || new Date().toISOString(),
   updatedAt: row.updated_at?.toISOString?.() || row.updated_at || new Date().toISOString(),
 });
 
 export default function buildOrdersRouterMySQL(pool) {
   const router = express.Router();
+  const financeService = new FinanceService(pool);
 
-  router.get('/', async (req, res) => {
+  router.get('/', tenantMiddleware, async (req, res) => {
     try {
       console.log('[Orders.MySQL] GET / - Fetching orders list');
+      // ✅ 多租户过滤 - 明确指定表别名避免歧义
+      const { where, params } = req.tenantFilter;
+      const tenantWhere = where.replace(/\bcompany_id\b/g, 'o.company_id');
+      
             const sql = `
         SELECT o.id, o.contract_number, o.project_name, o.delivery_location, o.payment_agreement,
                o.month_calculation_method, o.created_at, o.updated_at,
@@ -40,7 +47,7 @@ export default function buildOrdersRouterMySQL(pool) {
                o.shipping_fee_reduction, o.shipping_fee_calculation, o.is_tax_invoice,
                o.invoice_tax_rate, o.construction_category, o.other_agreements,
                l.name AS lessor_name, 
-               lc.company_name AS lessor_company_name,
+               COALESCE(tc.company_name, lc.company_name) AS lessor_company_name,
                c.name AS customer_name, e.name AS business_manager_name,
                COALESCE(entry_stats.entry_count, 0) AS entry_count,
                COALESCE(exit_stats.exit_count, 0) AS exit_count,
@@ -48,6 +55,7 @@ export default function buildOrdersRouterMySQL(pool) {
                COALESCE(refund_stats.refunds_sum, 0) AS refunds_sum
         FROM orders o
         LEFT JOIN customers l ON l.id = o.lessor_id
+        LEFT JOIN tenant_companies tc ON tc.id = o.lessor_company_id
         LEFT JOIN company_verifications lc ON lc.id = o.lessor_company_id
         LEFT JOIN customers c ON c.id = o.customer_id
         LEFT JOIN employees e ON e.id = o.business_manager_id
@@ -57,18 +65,20 @@ export default function buildOrdersRouterMySQL(pool) {
         ) exit_stats ON exit_stats.order_id = o.id
         LEFT JOIN (
           SELECT order_id, SUM(amount) AS receipts_sum
-          FROM order_receipts
+          FROM finance_records
+          WHERE record_type = 'receipt'
           GROUP BY order_id
         ) receipt_stats ON receipt_stats.order_id = o.id
         LEFT JOIN (
           SELECT order_id, SUM(amount) AS refunds_sum
-          FROM order_refunds
+          FROM finance_records
+          WHERE record_type = 'refund'
           GROUP BY order_id
         ) refund_stats ON refund_stats.order_id = o.id
-        WHERE 1=1
+        WHERE ${tenantWhere}
         ORDER BY o.updated_at DESC, o.id DESC`;
       console.log('[Orders.MySQL] Executing SQL query');
-      const [rows] = await pool.query(sql);
+      const [rows] = await pool.query(sql, params);
       console.log('[Orders.MySQL] Query successful, rows:', rows.length);
 
       // 映射数据，添加status字段
@@ -112,8 +122,8 @@ export default function buildOrdersRouterMySQL(pool) {
       const queries = [
         pool.query('SELECT COUNT(*) AS cnt FROM order_entries WHERE order_id = ?', [id]),
         pool.query('SELECT COUNT(*) AS cnt FROM order_exits WHERE order_id = ?', [id]),
-        pool.query('SELECT COUNT(*) AS cnt FROM order_receipts WHERE order_id = ?', [id]),
-        pool.query('SELECT COUNT(*) AS cnt FROM order_refunds WHERE order_id = ?', [id]),
+        pool.query('SELECT COUNT(*) AS cnt FROM finance_records WHERE order_id = ? AND record_type = "receipt"', [id]),
+        pool.query('SELECT COUNT(*) AS cnt FROM finance_records WHERE order_id = ? AND record_type = "refund"', [id]),
         // 查询报停记录数
         pool.query('SELECT COUNT(*) AS cnt FROM order_suspensions WHERE order_id = ?', [id]),
         pool.query('SELECT COUNT(*) AS cnt FROM order_claims WHERE order_id = ?', [id]),
@@ -339,8 +349,8 @@ export default function buildOrdersRouterMySQL(pool) {
       // ❗️ 使用 equipment_count 字段累加实际设备数量，而不是记录条数
       const entryCount = (entryRows || []).reduce((sum, r) => sum + (Number(r.equipment_count) || r.equipmentCodes?.length || 1), 0);
       const exitCount = (exitRows || []).reduce((sum, r) => sum + (Number(r.equipment_count) || r.equipmentCodes?.length || 1), 0);
-      const [receiptsSumRows] = await pool.query('SELECT COALESCE(SUM(amount), 0) AS sum FROM order_receipts WHERE order_id = ?', [id]);
-      const [refundsSumRows] = await pool.query('SELECT COALESCE(SUM(amount), 0) AS sum FROM order_refunds WHERE order_id = ?', [id]);
+      const [receiptsSumRows] = await pool.query('SELECT COALESCE(SUM(amount), 0) AS sum FROM finance_records WHERE order_id = ? AND record_type = "receipt"', [id]);
+      const [refundsSumRows] = await pool.query('SELECT COALESCE(SUM(amount), 0) AS sum FROM finance_records WHERE order_id = ? AND record_type = "refund"', [id]);
       const receiptsSum = Number((receiptsSumRows || [{}])[0]?.sum || 0);
       const refundsSum = Number((refundsSumRows || [{}])[0]?.sum || 0);
 
@@ -418,40 +428,40 @@ export default function buildOrdersRouterMySQL(pool) {
 
       const data = {
         id: String(o.id),
-        contract_number: o.contract_number,
-        lessor_id: o.lessor_id ? String(o.lessor_id) : undefined,
-        lessor_company_id: o.lessor_company_id ? String(o.lessor_company_id) : undefined,  // 添加对 lessor_company_id 的支持
-        lessor_name: o.lessor_name || o.lessor_company_name || undefined,  // 优先使用公司名称
-        customer_id: o.customer_id ? String(o.customer_id) : undefined,
-        customer_name: o.customer_name || undefined,
-        project_name: o.project_name || undefined,
-        business_manager_id: o.business_manager_id ? String(o.business_manager_id) : undefined,
-        business_manager_name: o.business_manager_name || undefined,
-        month_calculation_method: o.month_calculation_method || undefined,
-        delivery_location: o.delivery_location || undefined,
-        payment_agreement: o.payment_agreement || undefined,
-        shipping_fee_reduction: o.shipping_fee_reduction || undefined,
-        shipping_fee_calculation: o.shipping_fee_calculation || undefined,
-        is_tax_invoice: o.is_tax_invoice || undefined,
-        invoice_tax_rate: o.invoice_tax_rate || undefined,
-        construction_category: o.construction_category || undefined,
-        other_agreements: o.other_agreements || undefined,
+        contractNumber: o.contract_number,
+        lessorId: o.lessor_id ? String(o.lessor_id) : undefined,
+        lessorCompanyId: o.lessor_company_id ? String(o.lessor_company_id) : undefined,  // 添加对 lessor_company_id 的支持
+        lessorName: o.lessor_name || o.lessor_company_name || undefined,  // 优先使用公司名称
+        customerId: o.customer_id ? String(o.customer_id) : undefined,
+        customerName: o.customer_name || undefined,
+        projectName: o.project_name || undefined,
+        businessManagerId: o.business_manager_id ? String(o.business_manager_id) : undefined,
+        businessManagerName: o.business_manager_name || undefined,
+        monthCalculationMethod: o.month_calculation_method || undefined,
+        deliveryLocation: o.delivery_location || undefined,
+        paymentAgreement: o.payment_agreement || undefined,
+        shippingFeeReduction: o.shipping_fee_reduction || undefined,
+        shippingFeeCalculation: o.shipping_fee_calculation || undefined,
+        isTaxInvoice: o.is_tax_invoice || undefined,
+        invoiceTaxRate: o.invoice_tax_rate || undefined,
+        constructionCategory: o.construction_category || undefined,
+        otherAgreements: o.other_agreements || undefined,
         attachments: [],
-        rented_equipment_ids: rentedEquipmentCodes.length > 0 ? [rentedEquipmentCodes] : [],
-        equipment_items: (itemRows || []).map((it) => ({
+        rentedEquipmentIds: rentedEquipmentCodes.length > 0 ? [rentedEquipmentCodes] : [],
+        equipmentItems: (itemRows || []).map((it) => ({
           id: String(it.id),
-          equipment_type: it.equipment_type || undefined,
+          equipmentType: it.equipment_type || undefined,
           height: it.height || undefined,
           quantity: it.quantity != null ? Number(it.quantity) : undefined,
-          daily_rate: it.daily_rate != null ? Number(it.daily_rate) : undefined,
-          monthly_rate: it.monthly_rate != null ? Number(it.monthly_rate) : undefined,
+          dailyRate: it.daily_rate != null ? Number(it.daily_rate) : undefined,
+          monthlyRate: it.monthly_rate != null ? Number(it.monthly_rate) : undefined,
           deposit: it.deposit != null ? Number(it.deposit) : undefined,
-          shipping_fee: it.shipping_fee != null ? Number(it.shipping_fee) : undefined,
-          modification_fee: it.modification_fee != null ? Number(it.modification_fee) : undefined,
-          scheduled_entry_date: it.scheduled_entry_date || undefined,
-          estimated_exit_date: it.estimated_exit_date || undefined,
-          rental_period: it.rental_period != null ? Number(it.rental_period) : undefined,
-          shipping_type: it.shipping_type || '双程',
+          shippingFee: it.shipping_fee != null ? Number(it.shipping_fee) : undefined,
+          modificationFee: it.modification_fee != null ? Number(it.modification_fee) : undefined,
+          scheduledEntryDate: it.scheduled_entry_date || undefined,
+          estimatedExitDate: it.estimated_exit_date || undefined,
+          rentalPeriod: it.rental_period != null ? Number(it.rental_period) : undefined,
+          shippingType: it.shipping_type || '双程',
         })),
         entries: entryRows,
         exits: exitRows,
@@ -478,8 +488,8 @@ export default function buildOrdersRouterMySQL(pool) {
       try {
         console.log(`[Orders.MySQL] 查询订单 ${id} 的收款记录...`);
         const [receiptRows] = await pool.query(
-          `SELECT id, amount, receipt_date, attachments_json, created_at
-           FROM order_receipts WHERE order_id = ? ORDER BY receipt_date DESC, id DESC`,
+          `SELECT id, amount, record_date as receipt_date, attachments_json, created_at
+           FROM finance_records WHERE order_id = ? AND record_type = 'receipt' ORDER BY record_date DESC, id DESC`,
           [id]
         );
         console.log(`[Orders.MySQL] 查询到 ${receiptRows.length} 条收款记录`);
@@ -513,8 +523,8 @@ export default function buildOrdersRouterMySQL(pool) {
       // 退款记录
       try {
         const [refundRows] = await pool.query(
-          `SELECT id, amount, refund_date, attachments_json, created_at
-           FROM order_refunds WHERE order_id = ? ORDER BY refund_date DESC, id DESC`,
+          `SELECT id, amount, record_date as refund_date, attachments_json, created_at
+           FROM finance_records WHERE order_id = ? AND record_type = 'refund' ORDER BY record_date DESC, id DESC`,
           [id]
         );
         data.refunds = (refundRows || []).map((it) => {
@@ -695,7 +705,7 @@ export default function buildOrdersRouterMySQL(pool) {
   });
 
   // 创建订单
-  router.post('/', async (req, res) => {
+  router.post('/', tenantMiddleware, async (req, res) => {
     const conn = await pool.getConnection();
 
     try {
@@ -703,8 +713,8 @@ export default function buildOrdersRouterMySQL(pool) {
       console.log('[Orders.MySQL] 开始创建订单事务');
       console.log('[Orders.MySQL] Request body:', JSON.stringify(req.body, null, 2));
 
-      // 不再检查 company_id（多租户已移除）
-      const companyId = null;
+      // ✅ 多租户：自动设置 company_id
+      const companyId = req.tenantId;
 
       // 支持驼峰和下划线两种命名格式
       const {
@@ -792,23 +802,30 @@ export default function buildOrdersRouterMySQL(pool) {
         if (lessorRows && lessorRows.length > 0) {
           console.log('[Orders.MySQL] Lessor validated successfully in customers table');
         } else {
-          // 如果在 customers 表中不存在，检查是否在 company_verifications 表中存在
-          console.log('[Orders.MySQL] Lessor not found in customers table, checking company_verifications table');
-          const [companyRows] = await conn.query('SELECT id FROM company_verifications WHERE id = ?', [finalLessorId]);
-          if (!companyRows || companyRows.length === 0) {
-            console.log('[Orders.MySQL] Lessor not found in company_verifications table');
-            // 出租方在两个表中都不存在，返回错误
-            return res.status(400).json({
-              ok: false,
-              error: `出租方ID ${finalLessorId} 不存在`
-            });
+          // 如果在 customers 表中不存在，检查是否在 tenant_companies 表中存在（优先）
+          console.log('[Orders.MySQL] Lessor not found in customers table, checking tenant_companies table');
+          const [tenantCompanyRows] = await conn.query('SELECT id FROM tenant_companies WHERE id = ?', [finalLessorId]);
+          if (tenantCompanyRows && tenantCompanyRows.length > 0) {
+            console.log('[Orders.MySQL] Found company in tenant_companies table, using it as lessor');
+            validatedLessorId = null;
+            validatedLessorCompanyId = finalLessorId;
+          } else {
+            // 如果在 tenant_companies 表中也不存在，检查 company_verifications 表
+            console.log('[Orders.MySQL] Lessor not found in tenant_companies table, checking company_verifications table');
+            const [companyRows] = await conn.query('SELECT id FROM company_verifications WHERE id = ?', [finalLessorId]);
+            if (!companyRows || companyRows.length === 0) {
+              console.log('[Orders.MySQL] Lessor not found in any table');
+              // 出租方在所有表中都不存在，返回错误
+              return res.status(400).json({
+                ok: false,
+                error: `出租方ID ${finalLessorId} 不存在`
+              });
+            }
+            // 出租方在 company_verifications 中存在
+            console.log('[Orders.MySQL] Found company in company_verifications table, using it as lessor');
+            validatedLessorId = null;
+            validatedLessorCompanyId = finalLessorId;
           }
-          // 出租方在 company_verifications 中存在
-          console.log('[Orders.MySQL] Found company in company_verifications table, using it as lessor');
-          // 注意: lessor_id 是可为 NULL 的，需要判断是来自 customers 是 company_verifications
-          // 此处为了不破坎数据库简整性，我们将 lessor_id 设为 NULL，使用 lessor_company_id
-          validatedLessorId = null;
-          validatedLessorCompanyId = finalLessorId;
         }
       }
 
@@ -1014,32 +1031,34 @@ export default function buildOrdersRouterMySQL(pool) {
       // 如果提供了出租方ID，验证它是否在customers表中存在
       // 如果不存在，则检查是否在company_verifications表中存在，如果存在则在customers表中创建对应记录
       let validatedLessorId = finalLessorId;
+      let validatedLessorCompanyId = null;
       if (finalLessorId) {
         console.log('[Orders.MySQL] Validating lessor exists for update:', finalLessorId);
         const [lessorRows] = await pool.query('SELECT id FROM customers WHERE id = ?', [finalLessorId]);
         if (!lessorRows || lessorRows.length === 0) {
-          // 出租方在customers表中不存在，检查是否在company_verifications表中存在
-          console.log('[Orders.MySQL] Lessor not found in customers table for update, checking company_verifications table');
-          const [companyRows] = await pool.query('SELECT id, company_name FROM company_verifications WHERE id = ?', [finalLessorId]);
-          if (companyRows && companyRows.length > 0) {
-            // 在company_verifications表中找到了对应的公司，创建customers表中的记录
-            console.log('[Orders.MySQL] Found company in company_verifications table for update, creating customer record');
-            const companyName = companyRows[0].company_name;
-            const now = new Date();
-            const [createResult] = await pool.query(
-              `INSERT INTO customers (name, created_at, updated_at) VALUES (?, ?, ?)`,
-              [companyName, now, now]
-            );
-            console.log('[Orders.MySQL] Created customer record with ID for update:', createResult.insertId);
-            // 使用新创建的 customer ID 作为 lessor_id
-            validatedLessorId = createResult.insertId;
+          // 出租方在customers表中不存在，检查是否在tenant_companies表中存在（优先）
+          console.log('[Orders.MySQL] Lessor not found in customers table for update, checking tenant_companies table');
+          const [tenantCompanyRows] = await pool.query('SELECT id, company_name FROM tenant_companies WHERE id = ?', [finalLessorId]);
+          if (tenantCompanyRows && tenantCompanyRows.length > 0) {
+            console.log('[Orders.MySQL] Found company in tenant_companies table for update');
+            validatedLessorId = null;
+            validatedLessorCompanyId = finalLessorId;
           } else {
-            console.log('[Orders.MySQL] Lessor not found in company_verifications table for update');
-            // 出租方在两个表中都不存在，返回错误
-            return res.status(400).json({
-              ok: false,
-              error: `出租方ID ${finalLessorId} 不存在`
-            });
+            // 检查是否在company_verifications表中存在
+            console.log('[Orders.MySQL] Lessor not found in tenant_companies table for update, checking company_verifications table');
+            const [companyRows] = await pool.query('SELECT id, company_name FROM company_verifications WHERE id = ?', [finalLessorId]);
+            if (companyRows && companyRows.length > 0) {
+              console.log('[Orders.MySQL] Found company in company_verifications table for update');
+              validatedLessorId = null;
+              validatedLessorCompanyId = finalLessorId;
+            } else {
+              console.log('[Orders.MySQL] Lessor not found in any table for update');
+              // 出租方在所有表中都不存在，返回错误
+              return res.status(400).json({
+                ok: false,
+                error: `出租方ID ${finalLessorId} 不存在`
+              });
+            }
           }
         } else {
           console.log('[Orders.MySQL] Lessor validated successfully for update');
@@ -1051,7 +1070,7 @@ export default function buildOrdersRouterMySQL(pool) {
       // 更新订单主表
       const [result] = await pool.query(
         `UPDATE orders SET
-          contract_number = ?, lessor_id = ?, customer_id = ?,
+          contract_number = ?, lessor_id = ?, lessor_company_id = ?, customer_id = ?,
           project_name = ?, business_manager_id = ?,
           month_calculation_method = ?, delivery_location = ?,
           payment_agreement = ?, shipping_fee_reduction = ?,
@@ -1062,6 +1081,7 @@ export default function buildOrdersRouterMySQL(pool) {
         [
           finalContractNumber,
           validatedLessorId || null,
+          validatedLessorCompanyId || null,
           finalCustomerId,
           finalProjectName || null,
           finalBusinessManagerId || null,
@@ -1162,11 +1182,22 @@ export default function buildOrdersRouterMySQL(pool) {
         await conn.beginTransaction();
         // 若存在子表，确保清理（容错：即使不存在亦不会报错）
         // 注：suspensions（停工单）表在 MySQL 暂不存在，故无需删除
+        
+        // 🚀 先删除关联的财务记录（收款和退款）
+        await conn.query(
+          'DELETE FROM finance_records WHERE source_type = ? AND order_id = ?',
+          ['order', id]
+        ).catch(() => { });
+        console.log('[Orders.MySQL] ✅ 已删除订单关联的所有财务记录');
+        
+        // 🚀 删除关联的物流台账记录
+        await conn.query('DELETE FROM logistics_ledger WHERE order_id = ?', [id]).catch(() => { });
+        console.log('[Orders.MySQL] ✅ 已删除订单关联的所有物流台账记录');
+        
         await conn.query('DELETE FROM order_items WHERE order_id = ?', [id]).catch(() => { });
         await conn.query('DELETE FROM order_entries WHERE order_id = ?', [id]).catch(() => { });
         await conn.query('DELETE FROM order_exits WHERE order_id = ?', [id]).catch(() => { });
-        await conn.query('DELETE FROM order_receipts WHERE order_id = ?', [id]).catch(() => { });
-        await conn.query('DELETE FROM order_refunds WHERE order_id = ?', [id]).catch(() => { });
+        await conn.query('DELETE FROM finance_records WHERE order_id = ?', [id]).catch(() => { });
         await conn.query('DELETE FROM order_claims WHERE order_id = ?', [id]).catch(() => { });
         await conn.query('DELETE FROM order_settlements WHERE order_id = ?', [id]).catch(() => { });
         await conn.query('DELETE FROM order_clearances WHERE order_id = ?', [id]).catch(() => { });
@@ -1612,6 +1643,93 @@ export default function buildOrdersRouterMySQL(pool) {
       const equipmentId = record.equipmentId || record.equipment_id || null;
       const logisticsCost = Number(record.logisticsCost || record.logistics_cost || 0);
 
+      // ✅ 验证退场时间不能在已生成结算单据的周期之前
+      if (exitDate) {
+        console.log('[Orders.MySQL] 验证退场时间，退场日期:', exitDate);
+        
+        // 查询所有结算记录（按创建时间倒序）
+        const [settlements] = await conn.query(
+          `SELECT id, settlement_date, attachments_json 
+           FROM order_settlements 
+           WHERE order_id = ?
+           ORDER BY created_at DESC`,
+          [orderId]
+        );
+
+        if (settlements.length > 0) {
+          // 找出最新的结算周期结束日期
+          let latestCycleEndDate = null;
+          let latestSettlementNumber = '未知';
+          
+          for (const settlement of settlements) {
+            try {
+              const attachments = JSON.parse(settlement.attachments_json || '{}');
+              const cycleEndDate = attachments.cycleEndDate;
+              
+              if (cycleEndDate) {
+                // 如果是第一个结算记录，或者这个结算的周期结束日期更晚
+                if (!latestCycleEndDate || new Date(cycleEndDate) > new Date(latestCycleEndDate)) {
+                  latestCycleEndDate = cycleEndDate;
+                  latestSettlementNumber = attachments.settlementNumber || settlement.id;
+                }
+              }
+            } catch (e) {
+              console.error('[Orders.MySQL] 解析结算记录失败:', e);
+            }
+          }
+          
+          if (latestCycleEndDate) {
+            console.log('[Orders.MySQL] 最新结算周期结束日期:', latestCycleEndDate);
+
+            // 解析日期进行比较（只比较日期部分，忽略时间）
+            const exitDateObj = new Date(exitDate);
+            const cycleEndDateObj = new Date(latestCycleEndDate);
+            
+            exitDateObj.setHours(0, 0, 0, 0);
+            cycleEndDateObj.setHours(0, 0, 0, 0);
+
+            if (exitDateObj < cycleEndDateObj) {
+              await conn.rollback();
+              conn.release();
+
+              console.log('[Orders.MySQL] ❌ 退场时间验证失败 - 退场日期早于最新结算周期结束日期');
+              return res.json({
+                ok: false,
+                error: `设备退场日期（${exitDate}）不能早于已生成结算单据的周期结束日期（${latestCycleEndDate}）。结算单号：${latestSettlementNumber}。请选择正确的退场日期或删除该结算单后再退场。`
+              });
+            }
+
+            console.log('[Orders.MySQL] ✅ 退场时间验证通过');
+          } else {
+            console.log('[Orders.MySQL] 结算记录中未找到周期结束日期，使用 settlement_date 进行验证');
+            
+            // 兜底逻辑：如果没有 cycleEndDate，使用 settlement_date
+            const latestSettlement = settlements[0];
+            const latestSettlementDate = latestSettlement.settlement_date;
+            
+            if (latestSettlementDate) {
+              const exitDateObj = new Date(exitDate);
+              const settlementDateObj = new Date(latestSettlementDate);
+              
+              exitDateObj.setHours(0, 0, 0, 0);
+              settlementDateObj.setHours(0, 0, 0, 0);
+
+              if (exitDateObj < settlementDateObj) {
+                await conn.rollback();
+                conn.release();
+
+                return res.json({
+                  ok: false,
+                  error: `设备退场日期（${exitDate}）不能早于已生成结算单据的日期（${latestSettlementDate}）。请选择正确的退场日期或删除该结算单后再退场。`
+                });
+              }
+            }
+          }
+        } else {
+          console.log('[Orders.MySQL] 该订单暂无结算记录，跳过验证');
+        }
+      }
+
       // 将所有额外字段（退场单号、运输方式、租金截止日期等）存储为JSON
       const extraData = {
         exitNumber: record.exitNumber,
@@ -1878,14 +1996,50 @@ export default function buildOrdersRouterMySQL(pool) {
         attachments: record.attachments
       };
 
-      // 插入收款记录
+      // 获取订单信息（关联客户表获取客户名称）
+      const [orderRows] = await conn.query(
+        `SELECT o.contract_number, o.customer_id, o.company_id, c.name as customer_name 
+         FROM orders o 
+         LEFT JOIN customers c ON o.customer_id = c.id 
+         WHERE o.id = ?`,
+        [orderId]
+      );
+      const orderInfo = orderRows[0] || {};
+
+      // 🔧 确定 company_id：优先使用订单的 company_id，如果为空则使用当前用户的 company_id
+      const financeCompanyId = orderInfo.company_id || req.user?.company_id || null;
+      
+      // 直接插入财务记录表（不再使用 order_receipts）
       const [result] = await conn.query(
-        `INSERT INTO order_receipts (order_id, amount, receipt_date, attachments_json, created_at, updated_at) 
-         VALUES (?, ?, ?, ?, NOW(3), NOW(3))`,
-        [orderId, amount, receiptDate, JSON.stringify(extraData)]
+        `INSERT INTO finance_records (
+          record_type, source_type,
+          order_id, order_number, amount, payment_method, record_date,
+          customer_id, customer_name, remark, attachments_json,
+          company_id, created_by, created_at, updated_at
+        ) VALUES ('receipt', 'manual', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), NOW(3))`,
+        [
+          orderId,
+          orderInfo.contract_number || '',
+          amount,
+          extraData.paymentMethod || null,
+          receiptDate || new Date().toISOString().slice(0, 10),
+          orderInfo.customer_id || null,
+          orderInfo.customer_name || '',
+          extraData.remark || '',
+          JSON.stringify(extraData),
+          financeCompanyId,
+          req.user?.id || null
+        ]
       );
 
-      console.log('[Orders.MySQL] 收款记录已插入，ID:', result.insertId);
+      // 生成 record_number
+      const recordNumber = `REC-${String(result.insertId).padStart(8, '0')}`;
+      await conn.query(
+        `UPDATE finance_records SET record_number = ? WHERE id = ?`,
+        [recordNumber, result.insertId]
+      );
+
+      console.log('[Orders.MySQL] ✅ 财务收款记录已创建，ID:', result.insertId, '编号:', recordNumber);
 
       // 记录操作日志
       await conn.query(
@@ -1897,54 +2051,12 @@ export default function buildOrdersRouterMySQL(pool) {
           JSON.stringify({
             receiptId: result.insertId,
             receiptNumber: extraData.receiptNumber,
+            recordNumber: recordNumber,
             amount,
             receiptDate
           })
         ]
       );
-
-      console.log('[Orders.MySQL] 审计日志已记录');
-
-      // 🚀 自动创建财务记录
-      console.log('[Orders.MySQL] ✅ 开始创建财务收款记录，金额:', amount);
-
-      // 获取订单信息（关联客户表获取客户名称）
-      const [orderRows] = await conn.query(
-        `SELECT o.contract_number, o.customer_id, c.name as customer_name 
-         FROM orders o 
-         LEFT JOIN customers c ON o.customer_id = c.id 
-         WHERE o.id = ?`,
-        [orderId]
-      );
-      const orderInfo = orderRows[0] || {};
-
-      // 生成财务记录编号
-      const financeRecordNumber = `FR${new Date().toISOString().slice(0, 10).replace(/-/g, '')}${String(result.insertId).padStart(6, '0')}`;
-
-      // 插入财务记录
-      await conn.query(
-        `INSERT INTO finance_records (
-          record_number, record_type, source_type, source_id,
-          order_id, order_number, amount, payment_method, record_date,
-          customer_id, customer_name, remark, attachments_json,
-          created_at, updated_at
-        ) VALUES (?, 'receipt', 'order', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), NOW(3))`,
-        [
-          financeRecordNumber,
-          result.insertId,
-          orderId,
-          orderInfo.contract_number || '',
-          amount,
-          extraData.paymentMethod || null,
-          receiptDate || new Date().toISOString().slice(0, 10),
-          orderInfo.customer_id || null,
-          orderInfo.customer_name || '',
-          extraData.remark || `收款单号：${extraData.receiptNumber || ''}`,
-          JSON.stringify(extraData)
-        ]
-      );
-
-      console.log('[Orders.MySQL] ✅ 财务收款记录已创建，编号:', financeRecordNumber);
 
       await conn.commit();
       console.log('[Orders.MySQL] ✅ 收款事务提交成功');
@@ -1969,7 +2081,7 @@ export default function buildOrdersRouterMySQL(pool) {
       
       // 先查询收款记录信息用于日志
       const [receiptRows] = await conn.query(
-        `SELECT * FROM order_receipts WHERE id = ? AND order_id = ?`,
+        `SELECT * FROM finance_records WHERE id = ? AND order_id = ? AND record_type = 'receipt'`,
         [receiptId, orderId]
       );
 
@@ -1980,21 +2092,22 @@ export default function buildOrdersRouterMySQL(pool) {
 
       const receipt = receiptRows[0];
 
-      // 🚀 删除关联的财务记录
+      // 🚀 删除关联的财务记录（同时删除 order_receipts 中的旧记录，如果存在）
       await conn.query(
-        `DELETE FROM finance_records 
-         WHERE record_type = 'receipt' 
-           AND source_type = 'order' 
-           AND source_id = ?`,
+        `DELETE FROM order_receipts 
+         WHERE id = (
+           SELECT source_id FROM finance_records 
+           WHERE id = ? AND record_type = 'receipt' AND source_type = 'order'
+         )`,
         [receiptId]
-      );
-      console.log('[Orders.MySQL] ✅ 已删除关联的财务收款记录');
-
+      ).catch(() => { });
+      
       // 删除收款记录
       await conn.query(
-        `DELETE FROM order_receipts WHERE id = ? AND order_id = ?`,
+        `DELETE FROM finance_records WHERE id = ? AND order_id = ? AND record_type = 'receipt'`,
         [receiptId, orderId]
       );
+      console.log('[Orders.MySQL] ✅ 已删除财务收款记录');
 
       // 记录操作日志
       try {
@@ -2056,14 +2169,50 @@ export default function buildOrdersRouterMySQL(pool) {
         attachments: record.attachments
       };
 
-      // 插入退款记录
+      // 获取订单信息（关联客户表获取客户名称）
+      const [orderRows] = await conn.query(
+        `SELECT o.contract_number, o.customer_id, o.company_id, c.name as customer_name 
+         FROM orders o 
+         LEFT JOIN customers c ON o.customer_id = c.id 
+         WHERE o.id = ?`,
+        [orderId]
+      );
+      const orderInfo = orderRows[0] || {};
+
+      // 🔧 确定 company_id：优先使用订单的 company_id，如果为空则使用当前用户的 company_id
+      const financeCompanyId = orderInfo.company_id || req.user?.company_id || null;
+      
+      // 直接插入财务记录表（不再使用 order_refunds）
       const [result] = await conn.query(
-        `INSERT INTO order_refunds (order_id, amount, refund_date, attachments_json, created_at, updated_at) 
-         VALUES (?, ?, ?, ?, NOW(3), NOW(3))`,
-        [orderId, amount, refundDate, JSON.stringify(extraData)]
+        `INSERT INTO finance_records (
+          record_type, source_type,
+          order_id, order_number, amount, payment_method, record_date,
+          customer_id, customer_name, remark, attachments_json,
+          company_id, created_by, created_at, updated_at
+        ) VALUES ('refund', 'manual', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), NOW(3))`,
+        [
+          orderId,
+          orderInfo.contract_number || '',
+          amount,
+          extraData.paymentMethod || null,
+          refundDate || new Date().toISOString().slice(0, 10),
+          orderInfo.customer_id || null,
+          orderInfo.customer_name || '',
+          extraData.remark || '',
+          JSON.stringify(extraData),
+          financeCompanyId,
+          req.user?.id || null
+        ]
       );
 
-      console.log('[Orders.MySQL] 退款记录已插入，ID:', result.insertId);
+      // 生成 record_number
+      const recordNumber = `REF-${String(result.insertId).padStart(8, '0')}`;
+      await conn.query(
+        `UPDATE finance_records SET record_number = ? WHERE id = ?`,
+        [recordNumber, result.insertId]
+      );
+
+      console.log('[Orders.MySQL] ✅ 财务退款记录已创建，ID:', result.insertId, '编号:', recordNumber);
 
       // 记录操作日志
       await conn.query(
@@ -2075,54 +2224,12 @@ export default function buildOrdersRouterMySQL(pool) {
           JSON.stringify({
             refundId: result.insertId,
             refundNumber: extraData.refundNumber,
+            recordNumber: recordNumber,
             amount,
             refundDate
           })
         ]
       );
-
-      console.log('[Orders.MySQL] 审计日志已记录');
-
-      // 🚀 自动创建财务记录
-      console.log('[Orders.MySQL] ✅ 开始创建财务退款记录，金额:', amount);
-
-      // 获取订单信息（关联客户表获取客户名称）
-      const [orderRows] = await conn.query(
-        `SELECT o.contract_number, o.customer_id, c.name as customer_name 
-         FROM orders o 
-         LEFT JOIN customers c ON o.customer_id = c.id 
-         WHERE o.id = ?`,
-        [orderId]
-      );
-      const orderInfo = orderRows[0] || {};
-
-      // 生成财务记录编号
-      const financeRecordNumber = `FR${new Date().toISOString().slice(0, 10).replace(/-/g, '')}${String(result.insertId + 20000).padStart(6, '0')}`;
-
-      // 插入财务记录
-      await conn.query(
-        `INSERT INTO finance_records (
-          record_number, record_type, source_type, source_id,
-          order_id, order_number, amount, payment_method, record_date,
-          customer_id, customer_name, remark, attachments_json,
-          created_at, updated_at
-        ) VALUES (?, 'refund', 'order', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), NOW(3))`,
-        [
-          financeRecordNumber,
-          result.insertId,
-          orderId,
-          orderInfo.contract_number || '',
-          amount,
-          extraData.paymentMethod || null,
-          refundDate || new Date().toISOString().slice(0, 10),
-          orderInfo.customer_id || null,
-          orderInfo.customer_name || '',
-          extraData.remark || `退款单号：${extraData.refundNumber || ''}`,
-          JSON.stringify(extraData)
-        ]
-      );
-
-      console.log('[Orders.MySQL] ✅ 财务退款记录已创建，编号:', financeRecordNumber);
 
       await conn.commit();
       console.log('[Orders.MySQL] ✅ 退款事务提交成功');
@@ -2147,7 +2254,7 @@ export default function buildOrdersRouterMySQL(pool) {
       
       // 先查询退款记录信息用于日志
       const [refundRows] = await conn.query(
-        `SELECT * FROM order_refunds WHERE id = ? AND order_id = ?`,
+        `SELECT * FROM finance_records WHERE id = ? AND order_id = ? AND record_type = 'refund'`,
         [refundId, orderId]
       );
 
@@ -2158,21 +2265,22 @@ export default function buildOrdersRouterMySQL(pool) {
 
       const refund = refundRows[0];
 
-      // 🚀 删除关联的财务记录
+      // 🚀 删除关联的财务记录（同时删除 order_refunds 中的旧记录，如果存在）
       await conn.query(
-        `DELETE FROM finance_records 
-         WHERE record_type = 'refund' 
-           AND source_type = 'order' 
-           AND source_id = ?`,
+        `DELETE FROM order_refunds 
+         WHERE id = (
+           SELECT source_id FROM finance_records 
+           WHERE id = ? AND record_type = 'refund' AND source_type = 'order'
+         )`,
         [refundId]
-      );
-      console.log('[Orders.MySQL] ✅ 已删除关联的财务退款记录');
-
+      ).catch(() => { });
+      
       // 删除退款记录
       await conn.query(
-        `DELETE FROM order_refunds WHERE id = ? AND order_id = ?`,
+        `DELETE FROM finance_records WHERE id = ? AND order_id = ? AND record_type = 'refund'`,
         [refundId, orderId]
       );
+      console.log('[Orders.MySQL] ✅ 已删除财务退款记录');
 
       // 记录操作日志
       try {
@@ -2576,29 +2684,93 @@ export default function buildOrdersRouterMySQL(pool) {
   // DELETE /api/orders/:orderId/settlements/:settlementId
   router.delete('/:orderId/settlements/:settlementId', async (req, res) => {
     const { orderId, settlementId } = req.params;
+    const conn = await pool.getConnection();
+    
     try {
+      console.log('[Orders.MySQL] 删除结算单请求 - 订单ID:', orderId, '结算单ID:', settlementId);
+
+      // ✅ 验证：只能删除最新的结算单
+      // 查询该订单的所有结算单，按结算日期和创建时间降序排列
+      const [allSettlements] = await conn.query(
+        `SELECT id, settlement_date, created_at, attachments_json 
+         FROM order_settlements 
+         WHERE order_id = ?
+         ORDER BY 
+           COALESCE(settlement_date, '1900-01-01') DESC,
+           created_at DESC`,
+        [orderId]
+      );
+
+      console.log('[Orders.MySQL] 该订单共有', allSettlements.length, '条结算记录');
+
+      if (allSettlements.length === 0) {
+        return res.status(404).json({ 
+          ok: false, 
+          error: '未找到结算记录' 
+        });
+      }
+
+      // 获取最新的结算单ID
+      const latestSettlement = allSettlements[0];
+      const latestSettlementId = String(latestSettlement.id);
+      const requestedSettlementId = String(settlementId);
+
+      console.log('[Orders.MySQL] 最新结算单ID:', latestSettlementId, '请求删除ID:', requestedSettlementId);
+
+      // 验证是否为最新的结算单
+      if (latestSettlementId !== requestedSettlementId) {
+        // 获取被删除结算单的单号
+        let latestSettlementNumber = '未知';
+        try {
+          const attachments = JSON.parse(latestSettlement.attachments_json || '{}');
+          latestSettlementNumber = attachments.settlementNumber || '未知';
+        } catch (e) {
+          console.error('[Orders.MySQL] 解析结算单号失败:', e);
+        }
+
+        console.log('[Orders.MySQL] ❌ 删除失败 - 只能删除最新的结算单');
+        return res.json({
+          ok: false,
+          error: `只能删除最新的结算单！当前最新结算单号为：${latestSettlementNumber}。请按时间顺序从最新的结算单开始逐级删除。`
+        });
+      }
+
+      console.log('[Orders.MySQL] ✅ 验证通过，允许删除最新结算单');
+
       // 记录操作日志
-      await pool.query(
+      await conn.query(
         `INSERT INTO audit_logs (user_id, action, resource_type, resource_id, details, status, created_at)
          VALUES (?, 'settlement_deleted', 'order', ?, ?, 'success', NOW())`,
         [
           req.user?.id || null,
           orderId,
-          JSON.stringify({ settlementId })
+          JSON.stringify({ settlementId, isLatest: true })
         ]
       );
 
-      const [result] = await pool.query(
+      // 执行删除
+      const [result] = await conn.query(
         `DELETE FROM order_settlements WHERE id = ? AND order_id = ?`,
         [settlementId, orderId]
       );
+
       if (result.affectedRows === 0) {
-        return res.status(404).json({ ok: false, error: 'Settlement not found' });
+        return res.status(404).json({ 
+          ok: false, 
+          error: '结算记录不存在' 
+        });
       }
+
+      console.log('[Orders.MySQL] ✅ 结算单删除成功');
       res.json({ ok: true });
     } catch (err) {
       console.error('[Orders.MySQL] Delete settlement error:', err);
-      res.status(500).json({ ok: false, error: err?.message || 'Delete settlement error' });
+      res.status(500).json({ 
+        ok: false, 
+        error: err?.message || '删除结算记录失败' 
+      });
+    } finally {
+      conn.release();
     }
   });
 

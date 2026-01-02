@@ -5,6 +5,7 @@
  * 注意：采用一户一库模式，不需要租户隔离过滤
  */
 import express from 'express';
+import { tenantMiddleware } from '../middleware/tenant.js';
 import bcrypt from 'bcryptjs';
 
 export default function buildEmployeesRouter(pool) {
@@ -46,7 +47,7 @@ export default function buildEmployeesRouter(pool) {
 
   // ==================== 获取员工列表 ====================
   // GET /api/employees?page=1&pageSize=10&search=&status=
-  router.get('/', async (req, res) => {
+  router.get('/', tenantMiddleware, async (req, res) => {
     try {
       const page = Number(req.query.page) || 1;
       const pageSize = Number(req.query.pageSize) || 10;
@@ -121,7 +122,7 @@ export default function buildEmployeesRouter(pool) {
 
   // ==================== 获取单个员工详情 ====================
   // GET /api/employees/:id
-  router.get('/:id', async (req, res) => {
+  router.get('/:id', tenantMiddleware, async (req, res) => {
     const idNum = Number(req.params.id);
     if (!Number.isFinite(idNum) || idNum <= 0) {
       return res.status(400).json({ ok: false, error: 'Invalid employee id' });
@@ -169,7 +170,7 @@ export default function buildEmployeesRouter(pool) {
 
   // ==================== 创建员工 ====================
   // POST /api/employees
-  router.post('/', async (req, res) => {
+  router.post('/', tenantMiddleware, async (req, res) => {
     console.log('[Employees.POST] Creating employee, user:', req.user);
 
     try {
@@ -299,7 +300,7 @@ export default function buildEmployeesRouter(pool) {
   // ==================== 重置员工密码 ====================
   // PUT /api/employees/:id/reset-password
   // 注意：这个路由必须在 PUT /:id 之前定义，避免被通配路由拦截
-  router.put('/:id/reset-password', async (req, res) => {
+  router.put('/:id/reset-password', tenantMiddleware, async (req, res) => {
     console.log('[Employees.PUT] Resetting password for employee, user:', req.user);
 
     const idNum = Number(req.params.id);
@@ -342,7 +343,7 @@ export default function buildEmployeesRouter(pool) {
 
   // ==================== 更新员工 ====================
   // PUT /api/employees/:id
-  router.put('/:id', async (req, res) => {
+  router.put('/:id', tenantMiddleware, async (req, res) => {
     console.log('[Employees.PUT] Updating employee, user:', req.user);
 
     const idNum = Number(req.params.id);
@@ -472,7 +473,7 @@ export default function buildEmployeesRouter(pool) {
 
   // ==================== 删除员工 ====================
   // DELETE /api/employees/:id
-  router.delete('/:id', async (req, res) => {
+  router.delete('/:id', tenantMiddleware, async (req, res) => {
     console.log('[Employees.DELETE] Deleting employee, user:', req.user);
 
     const idNum = Number(req.params.id);

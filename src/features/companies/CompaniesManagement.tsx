@@ -220,7 +220,7 @@ export default function CompaniesManagement() {
       cancelText: '取消',
       onOk: async () => {
         try {
-          const token = localStorage.getItem('token') || localStorage.getItem('auth_token');
+          const token = sessionStorage.getItem('token') || sessionStorage.getItem('auth_token');
           const response = await fetch(`/api/companies/${company.id}/reset-password`, {
             method: 'POST',
             headers: {
@@ -253,7 +253,7 @@ export default function CompaniesManagement() {
       cancelText: '取消',
       onOk: async () => {
         try {
-          const token = localStorage.getItem('token') || localStorage.getItem('auth_token');
+          const token = sessionStorage.getItem('token') || sessionStorage.getItem('auth_token');
           const response = await fetch(`/api/companies/${company.id}/unlock`, {
             method: 'POST',
             headers: {

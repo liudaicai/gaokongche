@@ -1,4 +1,5 @@
 import express from 'express';
+import { tenantMiddleware } from '../middleware/tenant.js';
 
 export default function buildModelsRouterMySQL(pool) {
   const router = express.Router();
@@ -15,7 +16,8 @@ export default function buildModelsRouterMySQL(pool) {
     updatedAt: r.updated_at?.toISOString?.() || r.updated_at || new Date().toISOString(),
   });
 
-  router.get('/', async (_req, res) => {
+  // ✅ 多租户支持：使用 tenantMiddleware
+  router.get('/', tenantMiddleware, async (req, res) => {
     try {
       console.log('[Models.MySQL] 开始查询设备型号列表');
       

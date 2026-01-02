@@ -22,7 +22,6 @@ import SuspensionOperationTab from './tabs/SuspensionOperationTab';
 import ClaimOperationTab from './tabs/ClaimOperationTab';
 import SettlementTab from './tabs/SettlementTab';
 import ClearanceOperationTab from './tabs/ClearanceOperationTab';
-import ContractPreviewTab from './tabs/ContractPreviewTab';
 import NewOrderTab from './tabs/NewOrderTab';
 import InvoiceManagement from './InvoiceManagement';
 // 引入门店管理-公司认证数据源
@@ -122,49 +121,6 @@ const OrderList: React.FC = () => {
     }
   };
 
-  // 批量删除空订单（无任何关联单据）
-  const bulkDeleteEmptyOrders = async () => {
-    // 权限检查已放开，方便测试
-    try {
-      const empties: Order[] = [];
-      for (const o of orders) {
-        try {
-          const check = await apiGet<{ ok: boolean; data?: any; error?: string }>(`/orders/${o.id}/delete-check`);
-          if (!check?.ok || !check?.data) continue;
-          const associations = check.data.associations || {};
-          const total = Object.values(associations).map(v => Number(v) || 0).reduce((a, b) => a + b, 0);
-          if (total === 0) empties.push(o);
-        } catch { /* 忽略单个检查错误，继续 */ }
-      }
-      if (empties.length === 0) {
-        Modal.info({ title: '未发现空订单', content: '当前列表中没有可删除的空订单（无关联单据）。' });
-        return;
-      }
-      Modal.confirm({
-        title: `确认删除 ${empties.length} 个空订单？此操作不可撤销`,
-        okText: '确认删除',
-        cancelText: '取消',
-        okButtonProps: { danger: true },
-        onOk: async () => {
-          let ok = 0, fail = 0;
-          for (const o of empties) {
-            try {
-              await dispatch(deleteOrder(o.id)).unwrap();
-              ok++;
-            } catch {
-              fail++;
-            }
-          }
-          message.success(`批量删除完成：成功 ${ok}，失败 ${fail}`);
-          // 刷新列表，确保展示最新数据
-          try { await dispatch(fetchOrders()).unwrap(); } catch { }
-        },
-      });
-    } catch (e: any) {
-      Modal.error({ title: '批量删除失败', content: e?.message || '网络或服务器异常，请稍后重试' });
-    }
-  };
-
   // 权限判定（角色或权限字符串）
   const { user: authUser } = useSelector((s: RootState) => s.auth);
   const roleFromLS = (() => { try { const u = localStorage.getItem('user'); return u ? (JSON.parse(u)?.role) : undefined; } catch { return undefined; } })();
@@ -190,86 +146,133 @@ const OrderList: React.FC = () => {
     });
   };
 
-  const handleActionClick = (key: string, record: Order) => {
+  const handleActionClick = async (key: string, record: Order) => {
     if (key === 'entry') {
-      const tabKey = `order-entry-${record.id}`;
-      openTab({
-        key: tabKey,
-        label: `进场：${record.projectName || record.contractNumber || record.customerName || record.id}`,
-        content: <EntryOperationTab tabKey={tabKey} order={record} />
-      });
+      // 从列表打开进场页面时，先加载完整的订单详情以获取equipmentItems
+      try {
+        const fullOrder = await apiGet<Order>(`/orders/${record.id}`);
+        const tabKey = `order-entry-${record.id}`;
+        openTab({
+          key: tabKey,
+          label: `进场：${record.projectName || record.contractNumber || record.customerName || record.id}`,
+          content: <EntryOperationTab tabKey={tabKey} order={fullOrder} />
+        });
+      } catch (error) {
+        message.error('加载订单详情失败，请重试');
+        console.error('[OrderList] Load order detail error:', error);
+      }
       return;
     }
     if (key === 'exit') {
-      const tabKey = `order-exit-${record.id}`;
-      openTab({
-        key: tabKey,
-        label: `退场：${record.projectName || record.contractNumber || record.customerName || record.id}`,
-        content: <ExitOperationTab tabKey={tabKey} order={record} />
-      });
+      // 从列表打开退场页面时，先加载完整的订单详情
+      try {
+        const fullOrder = await apiGet<Order>(`/orders/${record.id}`);
+        const tabKey = `order-exit-${record.id}`;
+        openTab({
+          key: tabKey,
+          label: `退场：${record.projectName || record.contractNumber || record.customerName || record.id}`,
+          content: <ExitOperationTab tabKey={tabKey} order={fullOrder} />
+        });
+      } catch (error) {
+        message.error('加载订单详情失败，请重试');
+        console.error('[OrderList] Load order detail error:', error);
+      }
       return;
     }
     if (key === 'payment') {
-      const tabKey = `order-payment-${record.id}`;
-      openTab({
-        key: tabKey,
-        label: `收款：${record.projectName || record.contractNumber || record.customerName || record.id}`,
-        content: <ReceiptOperationTab tabKey={tabKey} order={record} />
-      });
+      // 从列表打开收款页面时，先加载完整的订单详情
+      try {
+        const fullOrder = await apiGet<Order>(`/orders/${record.id}`);
+        const tabKey = `order-payment-${record.id}`;
+        openTab({
+          key: tabKey,
+          label: `收款：${record.projectName || record.contractNumber || record.customerName || record.id}`,
+          content: <ReceiptOperationTab tabKey={tabKey} order={fullOrder} />
+        });
+      } catch (error) {
+        message.error('加载订单详情失败，请重试');
+        console.error('[OrderList] Load order detail error:', error);
+      }
       return;
     }
     if (key === 'refund') {
-      const tabKey = `order-refund-${record.id}`;
-      openTab({
-        key: tabKey,
-        label: `退款：${record.projectName || record.contractNumber || record.customerName || record.id}`,
-        content: <RefundOperationTab tabKey={tabKey} order={record} />
-      });
+      // 从列表打开退款页面时，先加载完整的订单详情
+      try {
+        const fullOrder = await apiGet<Order>(`/orders/${record.id}`);
+        const tabKey = `order-refund-${record.id}`;
+        openTab({
+          key: tabKey,
+          label: `退款：${record.projectName || record.contractNumber || record.customerName || record.id}`,
+          content: <RefundOperationTab tabKey={tabKey} order={fullOrder} />
+        });
+      } catch (error) {
+        message.error('加载订单详情失败，请重试');
+        console.error('[OrderList] Load order detail error:', error);
+      }
       return;
     }
     if (key === 'stop') {
-      const tabKey = `order-suspension-${record.id}`;
-      openTab({
-        key: tabKey,
-        label: `报停：${record.projectName || record.contractNumber || record.customerName || record.id}`,
-        content: <SuspensionOperationTab tabKey={tabKey} order={record} />
-      });
+      // 从列表打开报停页面时，先加载完整的订单详情
+      try {
+        const fullOrder = await apiGet<Order>(`/orders/${record.id}`);
+        const tabKey = `order-suspension-${record.id}`;
+        openTab({
+          key: tabKey,
+          label: `报停：${record.projectName || record.contractNumber || record.customerName || record.id}`,
+          content: <SuspensionOperationTab tabKey={tabKey} order={fullOrder} />
+        });
+      } catch (error) {
+        message.error('加载订单详情失败，请重试');
+        console.error('[OrderList] Load order detail error:', error);
+      }
       return;
     }
     if (key === 'claim') {
-      const tabKey = `order-claim-${record.id}`;
-      openTab({
-        key: tabKey,
-        label: `索赔：${record.projectName || record.contractNumber || record.customerName || record.id}`,
-        content: <ClaimOperationTab tabKey={tabKey} order={record} />
-      });
+      // 从列表打开索赔页面时，先加载完整的订单详情
+      try {
+        const fullOrder = await apiGet<Order>(`/orders/${record.id}`);
+        const tabKey = `order-claim-${record.id}`;
+        openTab({
+          key: tabKey,
+          label: `索赔：${record.projectName || record.contractNumber || record.customerName || record.id}`,
+          content: <ClaimOperationTab tabKey={tabKey} order={fullOrder} />
+        });
+      } catch (error) {
+        message.error('加载订单详情失败，请重试');
+        console.error('[OrderList] Load order detail error:', error);
+      }
       return;
     }
     if (key === 'settlement') {
-      const tabKey = `order-settlement-${record.id}`;
-      openTab({
-        key: tabKey,
-        label: `结算：${record.projectName || record.contractNumber || record.customerName || record.id}`,
-        content: <SettlementTab tabKey={tabKey} order={record} />
-      });
-      return;
-    }
-    if (key === 'contract') {
-      const tabKey = `order-contract-${record.id}`;
-      openTab({
-        key: tabKey,
-        label: `合同预览：${record.projectName || record.contractNumber || record.customerName || record.id}`,
-        content: <ContractPreviewTab tabKey={tabKey} order={record} />
-      });
+      // 从列表打开结算页面时，先加载完整的订单详情
+      try {
+        const fullOrder = await apiGet<Order>(`/orders/${record.id}`);
+        const tabKey = `order-settlement-${record.id}`;
+        openTab({
+          key: tabKey,
+          label: `结算：${record.projectName || record.contractNumber || record.customerName || record.id}`,
+          content: <SettlementTab tabKey={tabKey} order={fullOrder} />
+        });
+      } catch (error) {
+        message.error('加载订单详情失败，请重试');
+        console.error('[OrderList] Load order detail error:', error);
+      }
       return;
     }
     if (key === 'closing') {
-      const tabKey = `order-clearance-${record.id}`;
-      openTab({
-        key: tabKey,
-        label: `结清：${record.projectName || record.contractNumber || record.customerName || record.id}`,
-        content: <ClearanceOperationTab tabKey={tabKey} order={record} />
-      });
+      // 从列表打开结清页面时，先加载完整的订单详情
+      try {
+        const fullOrder = await apiGet<Order>(`/orders/${record.id}`);
+        const tabKey = `order-clearance-${record.id}`;
+        openTab({
+          key: tabKey,
+          label: `结清：${record.projectName || record.contractNumber || record.customerName || record.id}`,
+          content: <ClearanceOperationTab tabKey={tabKey} order={fullOrder} />
+        });
+      } catch (error) {
+        message.error('加载订单详情失败，请重试');
+        console.error('[OrderList] Load order detail error:', error);
+      }
       return;
     }
     if (key === 'change') {
@@ -418,7 +421,6 @@ const OrderList: React.FC = () => {
           <Dropdown
             menu={{
               items: [
-                { key: 'contract', label: <Button size="small">合同预览</Button> },
                 { key: 'entry', label: <Button size="small">进场</Button> },
                 { key: 'exit', label: <Button size="small">退场</Button> },
                 { key: 'payment', label: <Button size="small">收款</Button> },
@@ -481,14 +483,9 @@ const OrderList: React.FC = () => {
     <Card
       title="订单列表"
       extra={
-        <span style={{ display: 'inline-flex', gap: 8 }}>
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleAddOrder}>
-            新增订单
-          </Button>
-          <Button danger onClick={bulkDeleteEmptyOrders} disabled={!canDelete}>
-            清理空订单
-          </Button>
-        </span>
+        <Button type="primary" icon={<PlusOutlined />} onClick={handleAddOrder}>
+          新增订单
+        </Button>
       }
     >
       <Table

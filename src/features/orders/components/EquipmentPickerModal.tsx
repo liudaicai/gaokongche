@@ -21,13 +21,26 @@ interface Props {
   storeList?: Array<{ id: string; name: string }>;
   // 新增：默认门店筛选（通常取当前表单的出库门店）
   defaultStoreIds?: string[];
+  // 新增：禁用的设备编码及原因
+  disabledCodesWithReason?: Array<{ code: string; reason: string }>;
 }
 
-const EquipmentPickerModal: React.FC<Props> = ({ open, item, equipmentList, initialSelectedCodes, onCancel, onConfirm, allowedCodes, onlyWaitingDefault, forceWaitingOnly, defaultStoreIds }) => {
+const EquipmentPickerModal: React.FC<Props> = ({ open, item, equipmentList, initialSelectedCodes, onCancel, onConfirm, allowedCodes, onlyWaitingDefault, forceWaitingOnly, defaultStoreIds, disabledCodesWithReason }) => {
   // 修复：初始状态应该直接使用 onlyWaitingDefault，而不是在 useEffect 中再设置
   const [onlyWaiting, setOnlyWaiting] = useState(forceWaitingOnly ? true : (onlyWaitingDefault ?? true));
   const [filterHeight, setFilterHeight] = useState<string | undefined>(undefined); // 高度筛选
   const [selectedCodes, setSelectedCodes] = useState<string[]>(initialSelectedCodes || []);
+  
+  // 创建禁用设备的 Map，便于查询
+  const disabledCodesMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (disabledCodesWithReason) {
+      disabledCodesWithReason.forEach(item => {
+        map.set(item.code, item.reason);
+      });
+    }
+    return map;
+  }, [disabledCodesWithReason]);
 
   // 弹窗打开时重置状态
   React.useEffect(() => {
@@ -139,11 +152,28 @@ const EquipmentPickerModal: React.FC<Props> = ({ open, item, equipmentList, init
   const columns: ColumnsType<any> = useMemo(() => {
     if (allowedCodes && allowedCodes.length > 0) {
       // 退场/报停/索赔场景：仅显示出厂编号和自编码
-      return [
+      const cols: ColumnsType<any> = [
         { title: '出厂编号', dataIndex: 'code', key: 'code', width: 200 },
         { title: '自编码', dataIndex: 'customCode', key: 'customCode', width: 200 },
         { title: '高度', dataIndex: 'height', key: 'height', width: 120 },
       ];
+      // 如果有禁用设备，添加状态列
+      if (disabledCodesMap.size > 0) {
+        cols.push({
+          title: '状态',
+          dataIndex: 'code',
+          key: 'disabledReason',
+          width: 250,
+          render: (code: string) => {
+            const reason = disabledCodesMap.get(code);
+            if (reason) {
+              return <Tag color="error">{reason}</Tag>;
+            }
+            return <Tag color="success">可退场</Tag>;
+          },
+        });
+      }
+      return cols;
     }
     // 进场等场景：显示完整信息
     return [
@@ -166,7 +196,7 @@ const EquipmentPickerModal: React.FC<Props> = ({ open, item, equipmentList, init
         },
       },
     ];
-  }, [allowedCodes]);
+  }, [allowedCodes, disabledCodesMap]);
 
   const data = candidates.map((e) => ({ key: e.code, ...e }));
   const progressPercent = requiredCount > 0 ? Math.min(100, Math.round((selectedCodes.length / requiredCount) * 100)) : 0;
@@ -239,8 +269,11 @@ const EquipmentPickerModal: React.FC<Props> = ({ open, item, equipmentList, init
               onChange: handleRowSelectionChange,
               getCheckboxProps: (record) => {
                 const code = (record as any)?.code;
-                const disabled = !!(allowedCodes && allowedCodes.length > 0 && !allowedCodes.includes(code));
-                return { disabled };
+                // 检查是否在禁用列表中
+                const isDisabled = disabledCodesMap.has(code);
+                // 或者不在允许列表中（如果提供了）
+                const notAllowed = !!(allowedCodes && allowedCodes.length > 0 && !allowedCodes.includes(code));
+                return { disabled: isDisabled || notAllowed };
               },
             }}
             scroll={{ y: 420 }}

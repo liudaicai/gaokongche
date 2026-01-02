@@ -514,7 +514,7 @@ const EquipmentProfile: React.FC = () => {
 
     // 查询该设备关联的有效保单附件
     try {
-      const token = localStorage.getItem('auth_token');
+      const token = sessionStorage.getItem('auth_token');
       const response = await fetch(`/api/equipments/${equipment.id}/policy-attachments`, {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -759,7 +759,7 @@ const EquipmentProfile: React.FC = () => {
     action: `${API_BASE}/upload`,
     accept: '.jpg,.jpeg,.png,.pdf',
     headers: {
-      Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}`
+      Authorization: `Bearer ${sessionStorage.getItem('auth_token') || ''}`
     },
     beforeUpload(file) {
       const allowedTypes = ['image/jpeg', 'image/png', 'application/pdf'];
@@ -1463,7 +1463,7 @@ const EquipmentProfile: React.FC = () => {
                       size="small"
                       icon={<DownloadOutlined />}
                       onClick={() => {
-                        const token = localStorage.getItem('auth_token');
+                        const token = sessionStorage.getItem('auth_token');
                         fetch(`/api/policies/${item.policy_id}/attachments/${item.id}`, {
                           headers: {
                             'Authorization': `Bearer ${token}`

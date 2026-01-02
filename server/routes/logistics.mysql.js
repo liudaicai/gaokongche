@@ -1,4 +1,5 @@
 import express from 'express';
+import { tenantMiddleware } from '../middleware/tenant.js';
 
 export default function buildLogisticsRouterMySQL(pool) {
   const router = express.Router();
@@ -89,7 +90,7 @@ export default function buildLogisticsRouterMySQL(pool) {
   });
 
   // Vehicles
-  router.get('/vehicles', async (_req, res) => {
+  router.get('/vehicles', tenantMiddleware, async (_req, res) => {
     try {
       await ensureTables();
       const [rows] = await pool.query(
@@ -115,7 +116,7 @@ export default function buildLogisticsRouterMySQL(pool) {
       res.json([]); // 返回空数组以避免前端报错
     }
   });
-  router.delete('/vehicles/:id', async (req, res) => {
+  router.delete('/vehicles/:id', tenantMiddleware, async (req, res) => {
     try {
       const idNum = Number(req.params.id);
       if (!Number.isFinite(idNum) || idNum <= 0) return res.json({ ok: true, affectedRows: 0 });
@@ -127,7 +128,7 @@ export default function buildLogisticsRouterMySQL(pool) {
       res.json({ ok: true, affectedRows: 0 });
     }
   });
-  router.post('/vehicles', async (req, res) => {
+  router.post('/vehicles', tenantMiddleware, async (req, res) => {
     try {
       await ensureTables();
       const { plateNumber, spec, remark, storeIds } = req.body || {};
@@ -156,7 +157,7 @@ export default function buildLogisticsRouterMySQL(pool) {
       res.status(500).json({ ok: false, error: err?.message || 'Create error' });
     }
   });
-  router.put('/vehicles/:id', async (req, res) => {
+  router.put('/vehicles/:id', tenantMiddleware, async (req, res) => {
     try {
       const idNum = Number(req.params.id);
       if (!Number.isFinite(idNum) || idNum <= 0) return res.status(400).json({ ok: false, error: 'Invalid id' });
@@ -187,7 +188,7 @@ export default function buildLogisticsRouterMySQL(pool) {
   });
 
   // Drivers
-  router.get('/drivers', async (_req, res) => {
+  router.get('/drivers', tenantMiddleware, async (_req, res) => {
     try {
       await ensureTables();
       const [rows] = await pool.query(
@@ -212,7 +213,7 @@ export default function buildLogisticsRouterMySQL(pool) {
       res.json([]);
     }
   });
-  router.delete('/drivers/:id', async (req, res) => {
+  router.delete('/drivers/:id', tenantMiddleware, async (req, res) => {
     try {
       const idNum = Number(req.params.id);
       if (!Number.isFinite(idNum) || idNum <= 0) return res.json({ ok: true, affectedRows: 0 });
@@ -224,7 +225,7 @@ export default function buildLogisticsRouterMySQL(pool) {
       res.json({ ok: true, affectedRows: 0 });
     }
   });
-  router.post('/drivers', async (req, res) => {
+  router.post('/drivers', tenantMiddleware, async (req, res) => {
     try {
       await ensureTables();
       const { name, phone, remark, storeIds } = req.body || {};
@@ -253,7 +254,7 @@ export default function buildLogisticsRouterMySQL(pool) {
       res.status(500).json({ ok: false, error: err?.message || 'Create error' });
     }
   });
-  router.put('/drivers/:id', async (req, res) => {
+  router.put('/drivers/:id', tenantMiddleware, async (req, res) => {
     try {
       const idNum = Number(req.params.id);
       if (!Number.isFinite(idNum) || idNum <= 0) return res.status(400).json({ ok: false, error: 'Invalid id' });
@@ -284,7 +285,7 @@ export default function buildLogisticsRouterMySQL(pool) {
   });
 
   // Companies
-  router.get('/companies', async (_req, res) => {
+  router.get('/companies', tenantMiddleware, async (_req, res) => {
     try {
       await ensureTables();
       const [rows] = await pool.query(
@@ -309,7 +310,7 @@ export default function buildLogisticsRouterMySQL(pool) {
       res.json([]);
     }
   });
-  router.delete('/companies/:id', async (req, res) => {
+  router.delete('/companies/:id', tenantMiddleware, async (req, res) => {
     try {
       const idNum = Number(req.params.id);
       if (!Number.isFinite(idNum) || idNum <= 0) return res.json({ ok: true, affectedRows: 0 });
@@ -321,7 +322,7 @@ export default function buildLogisticsRouterMySQL(pool) {
       res.json({ ok: true, affectedRows: 0 });
     }
   });
-  router.post('/companies', async (req, res) => {
+  router.post('/companies', tenantMiddleware, async (req, res) => {
     try {
       await ensureTables();
       const { name, contactPerson, contactPhone, pricingRule, remark, storeIds } = req.body || {};
@@ -350,7 +351,7 @@ export default function buildLogisticsRouterMySQL(pool) {
       res.status(500).json({ ok: false, error: err?.message || 'Create error' });
     }
   });
-  router.put('/companies/:id', async (req, res) => {
+  router.put('/companies/:id', tenantMiddleware, async (req, res) => {
     try {
       const idNum = Number(req.params.id);
       if (!Number.isFinite(idNum) || idNum <= 0) return res.status(400).json({ ok: false, error: 'Invalid id' });
@@ -519,7 +520,7 @@ export default function buildLogisticsRouterMySQL(pool) {
   }
 
   // GET /api/logistics/ledger/debug - 临时调试接口
-  router.get('/ledger/debug', async (req, res) => {
+  router.get('/ledger/debug', tenantMiddleware, async (req, res) => {
     try {
       const [stores] = await pool.query('SELECT id, name FROM stores ORDER BY id');
       const [order] = await pool.query('SELECT id, contract_number, lessor_company_id FROM orders WHERE id = 57');
@@ -548,7 +549,7 @@ export default function buildLogisticsRouterMySQL(pool) {
   });
 
   // GET /api/logistics/ledger - 获取物流台账列表（带分页）
-  router.get('/ledger', async (req, res) => {
+  router.get('/ledger', tenantMiddleware, async (req, res) => {
     try {
       await ensureLedgerTable();
       
@@ -702,7 +703,7 @@ export default function buildLogisticsRouterMySQL(pool) {
   });
 
   // GET /api/logistics/ledger/statistics - 获取物流台账统计数据
-  router.get('/ledger/statistics', async (req, res) => {
+  router.get('/ledger/statistics', tenantMiddleware, async (req, res) => {
     try {
       await ensureLedgerTable();
 
@@ -776,7 +777,7 @@ export default function buildLogisticsRouterMySQL(pool) {
   });
 
   // POST /api/logistics/ledger - 创建物流台账记录
-  router.post('/ledger', async (req, res) => {
+  router.post('/ledger', tenantMiddleware, async (req, res) => {
     try {
       console.log('[Logistics.MySQL] POST /ledger - Request body:', JSON.stringify(req.body, null, 2));
       await ensureLedgerTable();
@@ -943,7 +944,7 @@ export default function buildLogisticsRouterMySQL(pool) {
   });
 
   // GET /api/logistics/ledger/:id - 获取单条台账记录
-  router.get('/ledger/:id', async (req, res) => {
+  router.get('/ledger/:id', tenantMiddleware, async (req, res) => {
     try {
       await ensureLedgerTable();
       
@@ -1027,7 +1028,7 @@ export default function buildLogisticsRouterMySQL(pool) {
   });
 
   // PUT /api/logistics/ledger/:id - 更新台账记录
-  router.put('/ledger/:id', async (req, res) => {
+  router.put('/ledger/:id', tenantMiddleware, async (req, res) => {
     try {
       await ensureLedgerTable();
       
@@ -1053,7 +1054,7 @@ export default function buildLogisticsRouterMySQL(pool) {
   });
 
   // DELETE /api/logistics/ledger/:id - 删除台账记录
-  router.delete('/ledger/:id', async (req, res) => {
+  router.delete('/ledger/:id', tenantMiddleware, async (req, res) => {
     try {
       await ensureLedgerTable();
       

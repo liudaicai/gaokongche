@@ -1,6 +1,7 @@
 // 设备租金统计路由
 // 提供按设备统计租金的接口，支持年度和自定义时间段查询
 import express from 'express';
+import { tenantMiddleware } from '../middleware/tenant.js';
 import { calculateOrderRevenue } from '../services/revenueCalculator.js';
 
 export default function buildEquipmentRentStatsRouter(pool) {
@@ -19,7 +20,7 @@ export default function buildEquipmentRentStatsRouter(pool) {
    * - pageSize: number (每页条数, 默认20)
    * - equipmentId: number (可选，按设备ID筛选)
    */
-  router.get('/statistics', async (req, res) => {
+  router.get('/statistics', tenantMiddleware, async (req, res) => {
     try {
       const mode = req.query.mode || 'year';
       const year = Number(req.query.year) || new Date().getFullYear();
@@ -289,7 +290,7 @@ export default function buildEquipmentRentStatsRouter(pool) {
    * 
    * Query参数: 同 /statistics 接口
    */
-  router.get('/export', async (req, res) => {
+  router.get('/export', tenantMiddleware, async (req, res) => {
     try {
       const mode = req.query.mode || 'year';
       const year = Number(req.query.year) || new Date().getFullYear();

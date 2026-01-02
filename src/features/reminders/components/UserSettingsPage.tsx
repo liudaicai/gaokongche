@@ -19,7 +19,8 @@ import {
   Badge,
   Avatar,
   Tag,
-  Divider
+  Divider,
+  Checkbox
 } from 'antd';
 import {
   SaveOutlined,
@@ -306,7 +307,7 @@ const UserSettingsPage: React.FC = () => {
                               <Form.Item name="email" noStyle>
                                 <Input 
                                   placeholder="输入邮箱地址" 
-                                  bordered={false}
+                                  variant="borderless"
                                   disabled={!enabled}
                                   style={{ padding: 0, borderBottom: '1px solid #d9d9d9', borderRadius: 0 }}
                                 />
@@ -336,7 +337,7 @@ const UserSettingsPage: React.FC = () => {
                               <Form.Item name="phone" noStyle>
                                 <Input 
                                   placeholder="输入手机号码" 
-                                  bordered={false}
+                                  variant="borderless"
                                   disabled={!enabled}
                                   style={{ padding: 0, borderBottom: '1px solid #d9d9d9', borderRadius: 0 }}
                                 />
@@ -366,7 +367,7 @@ const UserSettingsPage: React.FC = () => {
                               <Form.Item name="wechatOpenid" noStyle>
                                 <Input 
                                   placeholder="需先在个人中心绑定" 
-                                  bordered={false}
+                                  variant="borderless"
                                   disabled
                                   style={{ padding: 0, borderBottom: '1px solid #d9d9d9', borderRadius: 0, color: '#999' }}
                                 />
@@ -386,7 +387,7 @@ const UserSettingsPage: React.FC = () => {
                     选择您关注的业务类型，系统将仅为您推送已勾选类型的提醒通知。
                   </Paragraph>
 
-                  <Form.Item name="reminderTypeSettings" shouldUpdate>
+                  <Form.Item shouldUpdate noStyle>
                     {({ getFieldValue, setFieldsValue }) => {
                       const currentValues = getFieldValue('reminderTypeSettings') || [];
                       const toggle = (key: string) => {
@@ -497,7 +498,7 @@ const UserSettingsPage: React.FC = () => {
                           format="HH:mm"
                           placeholder="例如 22:00"
                           size="large"
-                          popupClassName="hide-disabled-options"
+                          popupStyle={{ zIndex: 9999 }}
                         />
                       </Form.Item>
                     </Col>

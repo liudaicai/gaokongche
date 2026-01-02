@@ -217,7 +217,7 @@ const PurchasesPage: React.FC = () => {
   // 加载当月还款统计
   const loadMonthlyRepayment = async () => {
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('auth_token');
+      const token = sessionStorage.getItem('token') || sessionStorage.getItem('auth_token');
       const currentDate = new Date();
       const year = currentDate.getFullYear();
       const month = currentDate.getMonth() + 1;
@@ -254,7 +254,7 @@ const PurchasesPage: React.FC = () => {
   const handleRepaymentSubmit = async () => {
     try {
       const values = await repaymentForm.validateFields();
-      const token = localStorage.getItem('token') || localStorage.getItem('auth_token');
+      const token = sessionStorage.getItem('token') || sessionStorage.getItem('auth_token');
       
       const response = await fetch(`/api/equipment-purchases/${selectedPurchaseForRepayment?.id}/repayment`, {
         method: 'POST',

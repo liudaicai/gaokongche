@@ -38,7 +38,7 @@ const EquipmentUsageAnalysis: React.FC<EquipmentUsageAnalysisProps> = ({ equipme
         `/api/equipment-usage/${equipmentId}?startMonth=${startMonth}&endMonth=${endMonth}`,
         {
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+            'Authorization': `Bearer ${sessionStorage.getItem('auth_token')}`
           }
         }
       );
@@ -63,7 +63,7 @@ const EquipmentUsageAnalysis: React.FC<EquipmentUsageAnalysisProps> = ({ equipme
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+          'Authorization': `Bearer ${sessionStorage.getItem('auth_token')}`
         },
         body: JSON.stringify({ month })
       });

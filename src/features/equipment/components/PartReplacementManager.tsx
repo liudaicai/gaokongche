@@ -38,7 +38,7 @@ const PartReplacementManager: React.FC<PartReplacementManagerProps> = ({ equipme
     try {
       const response = await fetch(`/api/part-replacements/equipment/${equipmentId}`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+          'Authorization': `Bearer ${sessionStorage.getItem('auth_token')}`
         }
       });
       const result = await response.json();
@@ -56,7 +56,7 @@ const PartReplacementManager: React.FC<PartReplacementManagerProps> = ({ equipme
     try {
       const response = await fetch('/api/part-replacements/categories', {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+          'Authorization': `Bearer ${sessionStorage.getItem('auth_token')}`
         }
       });
       const result = await response.json();
@@ -72,7 +72,7 @@ const PartReplacementManager: React.FC<PartReplacementManagerProps> = ({ equipme
     try {
       const response = await fetch(`/api/part-replacements/summary/equipment/${equipmentId}`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+          'Authorization': `Bearer ${sessionStorage.getItem('auth_token')}`
         }
       });
       const result = await response.json();
@@ -128,7 +128,7 @@ const PartReplacementManager: React.FC<PartReplacementManagerProps> = ({ equipme
           const response = await fetch(`/api/part-replacements/${id}`, {
             method: 'DELETE',
             headers: {
-              'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+              'Authorization': `Bearer ${sessionStorage.getItem('auth_token')}`
             }
           });
           const result = await response.json();
@@ -167,7 +167,7 @@ const PartReplacementManager: React.FC<PartReplacementManagerProps> = ({ equipme
         method,
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+          'Authorization': `Bearer ${sessionStorage.getItem('auth_token')}`
         },
         body: JSON.stringify(formData)
       });

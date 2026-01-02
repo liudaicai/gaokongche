@@ -1,4 +1,5 @@
 import express, { Router } from 'express';
+import { tenantMiddleware } from '../middleware/tenant.js';
 import dayjs from 'dayjs';
 import fs from 'fs';
 import path from 'path';
@@ -55,9 +56,16 @@ function getCipherKey() {
   return crypto.createHash('sha256').update(String(secret)).digest(); // 32 bytes
 }
 
-function buildListWhereAndParams(q) {
+function buildListWhereAndParams(q, tenantFilter) {
   const where = [];
   const params = [];
+  
+  // ✅ 添加租户过滤条件
+  if (tenantFilter && tenantFilter.where) {
+    where.push(tenantFilter.where);
+    params.push(...tenantFilter.params);
+  }
+  
   if (q.number) { where.push('number LIKE ?'); params.push(`%${q.number}%`); }
   if (q.company) { where.push('company LIKE ?'); params.push(`%${q.company}%`); }
   if (q.startDateFrom) { where.push('start_date >= ?'); params.push(q.startDateFrom); }
@@ -105,12 +113,13 @@ export default function buildPoliciesRouterMySQL(pool) {
   });
 
   // 列表（分页、查询、排序）
-  router.get('/', async (req, res) => {
+  router.get('/', tenantMiddleware, async (req, res) => {
     try {
       const { page = '1', pageSize = '10' } = req.query;
       const p = Math.max(1, Number(page));
       const ps = Math.min(100, Math.max(1, Number(pageSize)));
-      const { whereSql, params, sortSql } = buildListWhereAndParams(req.query);
+      // ✅ 传递租户过滤条件
+      const { whereSql, params, sortSql } = buildListWhereAndParams(req.query, req.tenantFilter);
       const [rows] = await pool.query(`SELECT SQL_CALC_FOUND_ROWS * FROM insurance_policies ${whereSql} ${sortSql} LIMIT ? OFFSET ?`, [...params, ps, (p - 1) * ps]);
       const [totalRows] = await pool.query('SELECT FOUND_ROWS() AS total');
       const total = Number(totalRows?.[0]?.total || 0);
@@ -183,7 +192,7 @@ export default function buildPoliciesRouterMySQL(pool) {
   });
 
   // 详情
-  router.get('/:id', async (req, res) => {
+  router.get('/:id', tenantMiddleware, async (req, res) => {
     const { id } = req.params;
     try {
       const [[row]] = await pool.query('SELECT * FROM insurance_policies WHERE id=?', [id]);
@@ -367,7 +376,7 @@ export default function buildPoliciesRouterMySQL(pool) {
   });
 
   // 更新（事务保证原子性）
-  router.put('/:id', async (req, res) => {
+  router.put('/:id', tenantMiddleware, async (req, res) => {
     const { id } = req.params;
     const b = req.body || {};
     const conn = await pool.getConnection();
@@ -402,7 +411,7 @@ export default function buildPoliciesRouterMySQL(pool) {
   });
 
   // 删除
-  router.delete('/:id', async (req, res) => {
+  router.delete('/:id', tenantMiddleware, async (req, res) => {
     const { id } = req.params;
     try {
       const [r] = await pool.query('DELETE FROM insurance_policies WHERE id=?',[id]);
@@ -486,7 +495,7 @@ export default function buildPoliciesRouterMySQL(pool) {
   router.get('/:id/attachments/:attId/download', requireAuth, downloadAttachment);
 
   // 转发（系统消息 + 邮件占位）
-  router.post('/:id/forward', async (req, res) => {
+  router.post('/:id/forward', tenantMiddleware, async (req, res) => {
     const { id } = req.params;
     const { toEmails = [] } = req.body || {};
     try {

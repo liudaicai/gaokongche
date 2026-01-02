@@ -1,4 +1,5 @@
 import express from 'express';
+import { tenantMiddleware } from '../middleware/tenant.js';
 // ✅ 多租户已移除 (2025-12-21)
 
 /**
@@ -47,7 +48,7 @@ export default function buildInvoicesRouter(pool) {
   const router = express.Router();
 
   // 获取指定订单的所有发票
-  router.get('/order/:orderId', async (req, res) => {
+  router.get('/order/:orderId', tenantMiddleware, async (req, res) => {
     try {
       const orderId = Number(req.params.orderId);
       if (!Number.isFinite(orderId) || orderId <= 0) {
@@ -79,7 +80,7 @@ export default function buildInvoicesRouter(pool) {
   });
 
   // 获取所有发票（带分页和筛选）
-  router.get('/', async (req, res) => {
+  router.get('/', tenantMiddleware, async (req, res) => {
     try {
       const { page = '1', pageSize = '20', status, type, orderId } = req.query;
       const offset = (Number(page) - 1) * Number(pageSize);
@@ -144,7 +145,7 @@ export default function buildInvoicesRouter(pool) {
   });
 
   // 获取单个发票详情
-  router.get('/:id', async (req, res) => {
+  router.get('/:id', tenantMiddleware, async (req, res) => {
     try {
       const id = Number(req.params.id);
       if (!Number.isFinite(id) || id <= 0) {
@@ -177,7 +178,7 @@ export default function buildInvoicesRouter(pool) {
   });
 
   // 创建发票
-  router.post('/', async (req, res) => {
+  router.post('/', tenantMiddleware, async (req, res) => {
     try {
       const {
         orderId,
@@ -275,7 +276,7 @@ export default function buildInvoicesRouter(pool) {
   });
 
   // 更新发票
-  router.put('/:id', async (req, res) => {
+  router.put('/:id', tenantMiddleware, async (req, res) => {
     try {
       const id = Number(req.params.id);
       if (!Number.isFinite(id) || id <= 0) {
@@ -430,7 +431,7 @@ export default function buildInvoicesRouter(pool) {
   });
 
   // 作废发票
-  router.post('/:id/cancel', async (req, res) => {
+  router.post('/:id/cancel', tenantMiddleware, async (req, res) => {
     try {
       const id = Number(req.params.id);
       if (!Number.isFinite(id) || id <= 0) {
@@ -475,7 +476,7 @@ export default function buildInvoicesRouter(pool) {
   });
 
   // 删除发票
-  router.delete('/:id', async (req, res) => {
+  router.delete('/:id', tenantMiddleware, async (req, res) => {
     try {
       const id = Number(req.params.id);
       if (!Number.isFinite(id) || id <= 0) {
@@ -501,7 +502,7 @@ export default function buildInvoicesRouter(pool) {
   });
 
   // 上传发票附件
-  router.post('/:id/attachments', async (req, res) => {
+  router.post('/:id/attachments', tenantMiddleware, async (req, res) => {
     try {
       const id = Number(req.params.id);
       if (!Number.isFinite(id) || id <= 0) {

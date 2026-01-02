@@ -42,6 +42,8 @@ const ExitOperationTab: React.FC<Props> = ({ order, tabKey }) => {
  const [pickerOpen, setPickerOpen] = useState(false);
   // 新增：转租设备还租标记 { [equipmentCode]: boolean }，默认为 true
   const [subleaseReturnMap, setSubleaseReturnMap] = useState<Record<string, boolean>>({});
+  // 新增：根据结算记录禁用的设备列表
+  const [disabledEquipmentsBySettlement, setDisabledEquipmentsBySettlement] = useState<Array<{ code: string; reason: string }>>([]);
  const stores = useSelector(selectStoresFromStore);
  const storesLoading = useSelector(selectStoresLoading);
  const storesError = useSelector(selectStoresError);
@@ -88,8 +90,15 @@ const defaultExitTemplate = useSelector(selectDefaultTemplate('退场'));
        hasRentedIds: !!(latestOrder?.rentedEquipmentIds),
        rentedCount: (latestOrder?.rentedEquipmentIds || []).flat().length
      });
-     setEffectiveOrder(latestOrder || null);
-   }, [order, orderFromStore]);
+     
+     // ✅ 防止无限循环：只在订单ID变化时更新
+     setEffectiveOrder(prev => {
+       if (prev?.id === latestOrder?.id && prev?.settlements === latestOrder?.settlements) {
+         return prev; // 如果订单ID和结算记录相同，不更新
+       }
+       return latestOrder || null;
+     });
+   }, [order?.id, orderFromStore?.id, orderFromStore?.settlements]);
    
    useEffect(() => {
      if (effectiveOrder) {
@@ -135,6 +144,7 @@ const defaultExitTemplate = useSelector(selectDefaultTemplate('退场'));
     if (!stores || stores.length === 0) {
       dispatch(fetchStores());
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch]);
 
   // 加载客户列表（仅在为空时触发一次）
@@ -142,7 +152,8 @@ const defaultExitTemplate = useSelector(selectDefaultTemplate('退场'));
     if (!customers || customers.length === 0) {
       dispatch(fetchCustomers() as any);
     }
-  }, [dispatch, customers]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dispatch]);
    
    // 如果客户列表晚于订单到达，则在字段为空时补全默认联系人与电话
    useEffect(() => {
@@ -222,21 +233,21 @@ const defaultExitTemplate = useSelector(selectDefaultTemplate('退场'));
        form.setFieldsValue({ vehicleId: undefined });
        message.warning('所选车辆已不存在或被移除，请重新选择');
      }
-   }, [vehicles]);
+   }, [vehicles, form]);
    useEffect(() => {
      const dId = form.getFieldValue('driverId');
      if (dId && !drivers.find(d => d.id === dId)) {
        form.setFieldsValue({ driverId: undefined });
        message.warning('所选司机已不存在或被移除，请重新选择');
      }
-   }, [drivers]);
+   }, [drivers, form]);
    useEffect(() => {
      const cId = form.getFieldValue('companyId');
      if (cId && !companies.find(c => c.id === cId)) {
        form.setFieldsValue({ companyId: undefined, companyContactName: undefined, companyContactPhone: undefined });
        message.warning('所选物流公司已不存在或被移除，请重新选择');
      }
-   }, [companies]);
+   }, [companies, form]);
 
   const handleCompanyChange = (companyId: string) => {
     const company = companies.find(c => c.id === companyId);
@@ -244,6 +255,59 @@ const defaultExitTemplate = useSelector(selectDefaultTemplate('退场'));
       companyContactName: company?.contactPerson,
       companyContactPhone: company?.contactPhone,
     });
+  };
+  
+  // 新增：根据退场日期和结算记录计算哪些设备不可退场
+  const updateDisabledEquipments = async (exitDate: dayjs.Dayjs | null) => {
+    if (!effectiveOrder || !exitDate) {
+      setDisabledEquipmentsBySettlement([]);
+      return;
+    }
+    
+    try {
+      // 获取订单的结算记录
+      const settlements = effectiveOrder.settlements || [];
+      if (settlements.length === 0) {
+        setDisabledEquipmentsBySettlement([]);
+        return;
+      }
+      
+      // 找出最新的结算周期结束日期
+      let latestCycleEndDate: string | null = null;
+      let latestSettlementNumber = '';
+      
+      for (const settlement of settlements) {
+        const cycleEndDate = (settlement as any).cycleEndDate;
+        if (cycleEndDate) {
+          if (!latestCycleEndDate || dayjs(cycleEndDate).isAfter(dayjs(latestCycleEndDate))) {
+            latestCycleEndDate = cycleEndDate;
+            latestSettlementNumber = (settlement as any).settlementNumber || settlement.id;
+          }
+        }
+      }
+      
+      // 如果没有结算周期结束日期，尝试使用 settlement_date
+      if (!latestCycleEndDate && settlements.length > 0) {
+        const latestSettlement = settlements[settlements.length - 1];
+        latestCycleEndDate = (latestSettlement as any).settlementDate;
+        latestSettlementNumber = (latestSettlement as any).settlementNumber || latestSettlement.id;
+      }
+      
+      // 如果退场日期早于最新结算周期结束日期，则所有在租设备都不可退场
+      if (latestCycleEndDate && exitDate.isBefore(dayjs(latestCycleEndDate), 'day')) {
+        const rentedSet = new Set((effectiveOrder.rentedEquipmentIds || []).flat());
+        const disabled = Array.from(rentedSet).map(code => ({
+          code,
+          reason: `结算单${latestSettlementNumber}周期至${latestCycleEndDate}`
+        }));
+        setDisabledEquipmentsBySettlement(disabled);
+      } else {
+        setDisabledEquipmentsBySettlement([]);
+      }
+    } catch (error) {
+      console.error('[退场] 计算禁用设备失败:', error);
+      setDisabledEquipmentsBySettlement([]);
+    }
   };
   
   const handleSave = async () => {
@@ -461,7 +525,10 @@ const defaultExitTemplate = useSelector(selectDefaultTemplate('退场'));
        message.success('退场属性配置已保存');
        closeTab(tabKey);
      } catch (e: any) {
-       message.error(e?.message || '请检查表单输入');
+       console.error('[ExitOperationTab] 保存失败:', e);
+       // 优先显示后端返回的详细错误信息
+       const errorMessage = e?.message || e?.error || e || '请检查表单输入';
+       message.error(errorMessage, 6); // 显示6秒，让用户有足够时间阅读
      }
    };
 
@@ -690,7 +757,15 @@ const defaultExitTemplate = useSelector(selectDefaultTemplate('退场'));
              <Row gutter={16}>
                <Col span={8}>
                  <Form.Item name="exitDate" label="退场时间" rules={[{ required: true, message: '请选择退场时间' }]}> 
-                   <DatePicker showTime format="YYYY-MM-DD HH:mm" style={{ width: '100%' }} />
+                   <DatePicker 
+                     showTime 
+                     format="YYYY-MM-DD HH:mm" 
+                     style={{ width: '100%' }}
+                     onChange={(date) => {
+                       // 当退场日期变化时，更新禁用设备列表
+                       updateDisabledEquipments(date);
+                     }}
+                   />
                  </Form.Item>
                </Col>
                <Col span={8}>
@@ -742,19 +817,38 @@ const defaultExitTemplate = useSelector(selectDefaultTemplate('退场'));
                
                return (
                  <div>
-                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                     <Text type="secondary">
-                       {rentedEquipments.length > 0 
-                         ? `当前订单在租设备共 ${rentedEquipments.length} 台，已选 ${selectedCodes.length} 台`
-                         : '当前订单暂无在租设备'}
-                     </Text>
-                     <Button
-                       type="primary"
-                       disabled={rentedEquipments.length === 0 || !canExit}
-                       onClick={() => setPickerOpen(true)}
-                     >
-                       选择退场设备
-                     </Button>
+                   <div>
+                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                       <Text type="secondary">
+                         {rentedEquipments.length > 0 
+                           ? `当前订单在租设备共 ${rentedEquipments.length} 台，已选 ${selectedCodes.length} 台`
+                           : '当前订单暂无在租设备'}
+                       </Text>
+                       <Button
+                         type="primary"
+                         disabled={rentedEquipments.length === 0 || !canExit}
+                         onClick={async () => {
+                           const exitDate = form.getFieldValue('exitDate');
+                           await updateDisabledEquipments(exitDate);
+                           setPickerOpen(true);
+                         }}
+                       >
+                         选择退场设备
+                       </Button>
+                     </div>
+                     {disabledEquipmentsBySettlement.length > 0 && (
+                       <div style={{ 
+                         padding: '8px 12px', 
+                         background: '#fff7e6', 
+                         border: '1px solid #ffd591', 
+                         borderRadius: 4,
+                         marginBottom: 12 
+                       }}>
+                         <Text type="warning">
+                           ⚠️ 注意：因退场日期早于结算周期，有 {disabledEquipmentsBySettlement.length} 台设备不可退场。请调整退场日期或先删除结算单据。
+                         </Text>
+                       </div>
+                     )}
                    </div>
                    
                    {selectedCodes.length > 0 && (
@@ -892,13 +986,14 @@ const defaultExitTemplate = useSelector(selectDefaultTemplate('退场'));
         initialSelectedCodes={form.getFieldValue('selectedEquipmentCodes') || []}
         allowedCodes={(effectiveOrder.rentedEquipmentIds || []).flat()}
         onlyWaitingDefault={false}
+        disabledCodesWithReason={disabledEquipmentsBySettlement}
         onCancel={() => setPickerOpen(false)}
        onConfirm={(codes) => {
           form.setFieldsValue({ selectedEquipmentCodes: codes });
           setPickerOpen(false);
         }}
       />
-      )}
+     )}
       {effectiveOrder && previewVisible && (
       <Modal
          title="退场模板预览"

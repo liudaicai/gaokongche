@@ -3,13 +3,11 @@
  * 提供门店的完整CRUD操作、统计功能、关联查询
  */
 import express from 'express';
-// ✅ 多租户已移除 (2025-12-21)
+import { tenantMiddleware } from '../middleware/tenant.js';
+import { requireSuperAdmin } from '../middleware/auth.js';
 
 export default function buildStoresRouterMySQL(pool) {
   const router = express.Router();
-  
-  // 单租户模式：简化的辅助函数
-  const getTenantFilter = () => ({ where: '1=1', params: [] });
 
   // DTO转换函数
   const toDto = (row) => ({
@@ -36,7 +34,7 @@ export default function buildStoresRouterMySQL(pool) {
 
   // ==================== 门店列表（增强：分页、搜索） ====================
   // GET /api/stores?page=1&pageSize=10&search=&storeType=&status=
-  router.get('/', async (req, res) => {
+  router.get('/', tenantMiddleware, async (req, res) => {
     try {
       const page = Number(req.query.page) || 1;
       const pageSize = Number(req.query.pageSize) || 10;
@@ -45,9 +43,10 @@ export default function buildStoresRouterMySQL(pool) {
       const storeType = req.query.storeType || '';
       const status = req.query.status || '';
       
-      // 多租户过滤 - 如果company_id为NULL则查询所有
-      let whereClause = 'WHERE 1=1';
-      const params = [];
+      // ✅ 多租户过滤
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+      let whereClause = `WHERE ${tenantWhere}`;
+      const params = [...tenantParams];
       
       // 检查stores表是否有company_id字段
       const [companyCols] = await pool.query(
@@ -118,9 +117,10 @@ export default function buildStoresRouterMySQL(pool) {
 
   // ==================== 门店统计 ====================
   // GET /api/stores/stats
-  router.get('/stats', async (req, res) => {
+  router.get('/stats', tenantMiddleware, async (req, res) => {
     try {
-      const tenantFilter = getTenantFilter(req);
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+      const tenantFilter = { where: tenantWhere, params: tenantParams };
       
       // 总门店数
       const [totalRows] = await pool.query(
@@ -213,14 +213,15 @@ export default function buildStoresRouterMySQL(pool) {
 
   // ==================== 获取门店的设备列表 ====================
   // GET /api/stores/:id/equipments
-  router.get('/:id/equipments', async (req, res) => {
+  router.get('/:id/equipments', tenantMiddleware, async (req, res) => {
     const idNum = Number(req.params.id);
     if (!Number.isFinite(idNum) || idNum <= 0) {
       return res.status(400).json({ ok: false, error: 'Invalid store id' });
     }
     
     try {
-      const tenantFilter = getTenantFilter(req);
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+      const tenantFilter = { where: tenantWhere, params: tenantParams };
       
       // 检查门店是否存在
       const [storeRows] = await pool.query(
@@ -270,14 +271,15 @@ export default function buildStoresRouterMySQL(pool) {
 
   // ==================== 获取门店的订单列表 ====================
   // GET /api/stores/:id/orders
-  router.get('/:id/orders', async (req, res) => {
+  router.get('/:id/orders', tenantMiddleware, async (req, res) => {
     const idNum = Number(req.params.id);
     if (!Number.isFinite(idNum) || idNum <= 0) {
       return res.status(400).json({ ok: false, error: 'Invalid store id' });
     }
     
     try {
-      const tenantFilter = getTenantFilter(req);
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+      const tenantFilter = { where: tenantWhere, params: tenantParams };
       
       // 检查门店是否存在
       const [storeRows] = await pool.query(
@@ -330,13 +332,17 @@ export default function buildStoresRouterMySQL(pool) {
   
   // 获取公司认证列表
   // GET /api/stores/company-verifications
-  router.get('/company-verifications', async (req, res) => {
+  router.get('/company-verifications', requireSuperAdmin, async (req, res) => {
     try {
       const [rows] = await pool.query(
-        `SELECT id, company_name, company_address, credit_code, 
-                bank_account, bank_name, created_at, updated_at
-         FROM company_verifications
-         ORDER BY created_at DESC`
+        `SELECT 
+          cv.id, cv.company_name, cv.company_address, cv.credit_code,
+          cv.bank_account, cv.bank_name, cv.contact_name, cv.contact_phone,
+          cv.id_card_number, cv.created_at, cv.updated_at,
+          u.is_active
+         FROM company_verifications cv
+         LEFT JOIN users u ON cv.id = u.company_id AND u.username = cv.contact_phone
+         ORDER BY cv.created_at DESC`
       );
       
       const data = rows.map(row => ({
@@ -346,6 +352,10 @@ export default function buildStoresRouterMySQL(pool) {
         creditCode: row.credit_code,
         bankAccount: row.bank_account,
         bankName: row.bank_name,
+        contactName: row.contact_name,
+        contactPhone: row.contact_phone,
+        idCardNumber: row.id_card_number,
+        isActive: row.is_active === 1,
         createdAt: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
         updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString()
       }));
@@ -359,13 +369,14 @@ export default function buildStoresRouterMySQL(pool) {
 
   // 获取单个公司认证
   // GET /api/stores/company-verifications/:id
-  router.get('/company-verifications/:id', async (req, res) => {
+  router.get('/company-verifications/:id', requireSuperAdmin, async (req, res) => {
     try {
       const id = Number(req.params.id);
       
       const [rows] = await pool.query(
         `SELECT id, company_name, company_address, credit_code,
-                bank_account, bank_name, created_at, updated_at
+                bank_account, bank_name, contact_name, contact_phone,
+                id_card_number, created_at, updated_at
          FROM company_verifications
          WHERE id = ?`,
         [id]
@@ -383,6 +394,9 @@ export default function buildStoresRouterMySQL(pool) {
         creditCode: row.credit_code,
         bankAccount: row.bank_account,
         bankName: row.bank_name,
+        contactName: row.contact_name,
+        contactPhone: row.contact_phone,
+        idCardNumber: row.id_card_number,
         createdAt: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
         updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString()
       };
@@ -396,50 +410,175 @@ export default function buildStoresRouterMySQL(pool) {
 
   // 创建公司认证
   // POST /api/stores/company-verifications
-  router.post('/company-verifications', async (req, res) => {
+  router.post('/company-verifications', requireSuperAdmin, async (req, res) => {
+    const connection = await pool.getConnection();
+    
     try {
-      const { companyName, companyAddress, creditCode, bankAccount, bankName } = req.body;
+      await connection.beginTransaction();
+      
+      const { 
+        companyName, 
+        companyAddress, 
+        creditCode, 
+        bankAccount, 
+        bankName,
+        contactName,
+        contactPhone,
+        idCardNumber
+      } = req.body;
       
       // 验证必填字段
       if (!companyName || !creditCode) {
-        return res.status(400).json({ ok: false, error: 'Company name and credit code are required' });
+        return res.status(400).json({ ok: false, error: '公司名称和信用代码不能为空' });
+      }
+      
+      if (!contactName || !contactPhone) {
+        return res.status(400).json({ ok: false, error: '联系人姓名和电话不能为空' });
+      }
+      
+      // 验证电话格式（手机号）
+      if (!/^1[3-9]\d{9}$/.test(contactPhone)) {
+        return res.status(400).json({ ok: false, error: '请输入有效的手机号码' });
+      }
+      
+      // 验证身份证号格式（如果提供）
+      if (idCardNumber && !/^[1-9]\d{5}(18|19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]$/.test(idCardNumber)) {
+        return res.status(400).json({ ok: false, error: '请输入有效的身份证号码' });
       }
       
       // 检查信用代码是否已存在
-      const [existing] = await pool.query(
+      const [existing] = await connection.query(
         'SELECT id FROM company_verifications WHERE credit_code = ?',
         [creditCode]
       );
       
       if (existing.length > 0) {
-        return res.status(409).json({ ok: false, error: 'Credit code already exists' });
+        await connection.rollback();
+        return res.status(409).json({ ok: false, error: '该信用代码已存在' });
       }
       
-      // 插入公司认证
-      const [result] = await pool.query(
-        `INSERT INTO company_verifications 
-         (company_name, company_address, credit_code, bank_account, bank_name)
-         VALUES (?, ?, ?, ?, ?)`,
-        [companyName, companyAddress || null, creditCode, bankAccount || null, bankName || null]
+      // 检查电话号码是否已被使用（作为用户名）
+      const [existingUser] = await connection.query(
+        'SELECT id FROM users WHERE username = ?',
+        [contactPhone]
       );
       
-      res.json({ ok: true, data: { id: String(result.insertId) } });
+      if (existingUser.length > 0) {
+        await connection.rollback();
+        return res.status(409).json({ ok: false, error: '该电话号码已被注册为账号' });
+      }
+      
+      // 1. 插入公司认证
+      const [companyResult] = await connection.query(
+        `INSERT INTO company_verifications 
+         (company_name, company_address, credit_code, bank_account, bank_name, 
+          contact_name, contact_phone, id_card_number)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          companyName, 
+          companyAddress || null, 
+          creditCode, 
+          bankAccount || null, 
+          bankName || null,
+          contactName,
+          contactPhone,
+          idCardNumber || null
+        ]
+      );
+      
+      const companyId = companyResult.insertId;
+      
+      // 2. 自动创建管理员账号
+      // 导入bcrypt来生成密码hash
+      const bcrypt = await import('bcryptjs');
+      const defaultPassword = '123456';
+      const passwordHash = await bcrypt.default.hash(defaultPassword, 10);
+      
+      await connection.query(
+        `INSERT INTO users 
+         (username, password_hash, name, phone, role, company_id, is_active, is_locked, failed_login_attempts)
+         VALUES (?, ?, ?, ?, 'admin', ?, 1, 0, 0)`,
+        [contactPhone, passwordHash, contactName, contactPhone, companyId]
+      );
+      
+      // 3. ✅ 为租户在 tenant_companies 创建默认公司主体
+      await connection.query(
+        `INSERT INTO tenant_companies (
+          company_id, company_name, company_address, credit_code,
+          bank_account, bank_name, contact_name, contact_phone,
+          is_default, status, remark
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          companyId,                                       // 关联到租户ID
+          companyName,                                     // 使用租户的公司名称
+          companyAddress || null,                          // 使用租户的公司地址
+          creditCode,                                      // 使用租户的信用代码
+          bankAccount || null,                             // 使用租户的银行账号
+          bankName || null,                                // 使用租户的开户行
+          contactName,                                     // 使用租户的联系人
+          contactPhone,                                    // 使用租户的联系电话
+          1,                                               // 设为默认公司
+          'active',                                        // 状态为启用
+          '创建租户时自动生成的默认公司主体'                // 备注
+        ]
+      );
+      
+      await connection.commit();
+      
+      console.log(`[Stores] ✅ 租户创建成功 - ID: ${companyId}, 公司: ${companyName}`);
+      console.log(`[Stores] ✅ 已自动创建默认公司主体和管理员账号`);
+      
+      res.json({ 
+        ok: true, 
+        data: { 
+          id: String(companyId),
+          adminUsername: contactPhone,
+          defaultPassword: defaultPassword,
+          message: '租户创建成功（已自动创建默认公司主体和管理员账号）'
+        } 
+      });
     } catch (error) {
+      await connection.rollback();
       console.error('[Stores] Create company verification error:', error);
       res.status(500).json({ ok: false, error: error.message });
+    } finally {
+      connection.release();
     }
   });
 
   // 更新公司认证
   // PUT /api/stores/company-verifications/:id
-  router.put('/company-verifications/:id', async (req, res) => {
+  router.put('/company-verifications/:id', requireSuperAdmin, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const { companyName, companyAddress, creditCode, bankAccount, bankName } = req.body;
+      const { 
+        companyName, 
+        companyAddress, 
+        creditCode, 
+        bankAccount, 
+        bankName,
+        contactName,
+        contactPhone,
+        idCardNumber
+      } = req.body;
       
       // 验证必填字段
       if (!companyName || !creditCode) {
-        return res.status(400).json({ ok: false, error: 'Company name and credit code are required' });
+        return res.status(400).json({ ok: false, error: '公司名称和信用代码不能为空' });
+      }
+      
+      if (!contactName || !contactPhone) {
+        return res.status(400).json({ ok: false, error: '联系人姓名和电话不能为空' });
+      }
+      
+      // 验证电话格式
+      if (!/^1[3-9]\d{9}$/.test(contactPhone)) {
+        return res.status(400).json({ ok: false, error: '请输入有效的手机号码' });
+      }
+      
+      // 验证身份证号格式（如果提供）
+      if (idCardNumber && !/^[1-9]\d{5}(18|19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]$/.test(idCardNumber)) {
+        return res.status(400).json({ ok: false, error: '请输入有效的身份证号码' });
       }
       
       // 检查公司认证是否存在
@@ -466,9 +605,20 @@ export default function buildStoresRouterMySQL(pool) {
       await pool.query(
         `UPDATE company_verifications
          SET company_name = ?, company_address = ?, credit_code = ?,
-             bank_account = ?, bank_name = ?
+             bank_account = ?, bank_name = ?,
+             contact_name = ?, contact_phone = ?, id_card_number = ?
          WHERE id = ?`,
-        [companyName, companyAddress || null, creditCode, bankAccount || null, bankName || null, id]
+        [
+          companyName, 
+          companyAddress || null, 
+          creditCode, 
+          bankAccount || null, 
+          bankName || null,
+          contactName,
+          contactPhone,
+          idCardNumber || null,
+          id
+        ]
       );
       
       res.json({ ok: true });
@@ -480,50 +630,236 @@ export default function buildStoresRouterMySQL(pool) {
 
   // 删除公司认证
   // DELETE /api/stores/company-verifications/:id
-  router.delete('/company-verifications/:id', async (req, res) => {
+  router.delete('/company-verifications/:id', requireSuperAdmin, async (req, res) => {
+    const connection = await pool.getConnection();
+    
     try {
+      await connection.beginTransaction();
+      
       const id = Number(req.params.id);
       
+      // 检查租户是否存在
+      const [companies] = await connection.query(
+        'SELECT id FROM company_verifications WHERE id = ?',
+        [id]
+      );
+      
+      if (companies.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({ ok: false, error: 'Company verification not found' });
+      }
+      
       // 检查是否有订单使用此公司认证
-      const [orders] = await pool.query(
+      const [orders] = await connection.query(
         'SELECT COUNT(*) as count FROM orders WHERE lessor_company_id = ?',
         [id]
       );
       
       if (orders[0].count > 0) {
+        await connection.rollback();
         return res.status(400).json({
           ok: false,
           error: `该公司认证被 ${orders[0].count} 个订单使用，不能删除`
         });
       }
       
-      // 删除公司认证
-      const [result] = await pool.query(
+      // 1. 删除该租户的公司主体（tenant_companies）
+      const [tenantCompanies] = await connection.query(
+        'DELETE FROM tenant_companies WHERE company_id = ?',
+        [id]
+      );
+      
+      // 2. 删除该租户下的所有用户（防止孤儿账号）
+      const [users] = await connection.query(
+        'DELETE FROM users WHERE company_id = ?',
+        [id]
+      );
+      
+      // 3. 删除租户记录
+      await connection.query(
         'DELETE FROM company_verifications WHERE id = ?',
         [id]
       );
       
-      if (result.affectedRows === 0) {
-        return res.status(404).json({ ok: false, error: 'Company verification not found' });
+      await connection.commit();
+      
+      console.log(`[Stores] ✅ 租户删除成功 - ID: ${id}`);
+      console.log(`[Stores] ✅ 已删除 ${tenantCompanies.affectedRows} 个公司主体, ${users.affectedRows} 个用户账号`);
+      
+      res.json({ 
+        ok: true, 
+        message: `租户删除成功（已删除 ${tenantCompanies.affectedRows} 个公司主体和 ${users.affectedRows} 个用户账号）` 
+      });
+    } catch (error) {
+      await connection.rollback();
+      console.error('[Stores] Delete company verification error:', error);
+      res.status(500).json({ ok: false, error: error.message });
+    } finally {
+      connection.release();
+    }
+  });
+
+  // 重置租户管理员密码
+  // PUT /api/stores/company-verifications/:id/reset-password
+  router.put('/company-verifications/:id/reset-password', requireSuperAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      
+      // 查询租户的联系电话（管理员账号）
+      const [companies] = await pool.query(
+        'SELECT contact_phone, contact_name FROM company_verifications WHERE id = ?',
+        [id]
+      );
+      
+      if (companies.length === 0) {
+        return res.status(404).json({ ok: false, error: '租户不存在' });
       }
       
-      res.json({ ok: true });
+      const contactPhone = companies[0].contact_phone;
+      const contactName = companies[0].contact_name;
+      
+      if (!contactPhone) {
+        return res.status(400).json({ ok: false, error: '租户没有关联的管理员账号' });
+      }
+      
+      // 查找管理员账号
+      const [users] = await pool.query(
+        'SELECT id FROM users WHERE username = ? AND company_id = ?',
+        [contactPhone, id]
+      );
+      
+      if (users.length === 0) {
+        return res.status(404).json({ ok: false, error: '未找到管理员账号' });
+      }
+      
+      // 重置密码为 123456
+      const bcrypt = await import('bcryptjs');
+      const newPassword = '123456';
+      const passwordHash = await bcrypt.default.hash(newPassword, 10);
+      
+      await pool.query(
+        'UPDATE users SET password_hash = ?, failed_login_attempts = 0, is_locked = 0 WHERE id = ?',
+        [passwordHash, users[0].id]
+      );
+      
+      res.json({ 
+        ok: true, 
+        data: { 
+          username: contactPhone,
+          newPassword: newPassword,
+          message: '密码已重置为 123456'
+        }
+      });
     } catch (error) {
-      console.error('[Stores] Delete company verification error:', error);
+      console.error('[Stores] Reset password error:', error);
+      res.status(500).json({ ok: false, error: error.message });
+    }
+  });
+
+  // 解除登录限制（解锁账号）
+  // PUT /api/stores/company-verifications/:id/unlock
+  router.put('/company-verifications/:id/unlock', requireSuperAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      
+      // 查询租户的联系电话（管理员账号）
+      const [companies] = await pool.query(
+        'SELECT contact_phone FROM company_verifications WHERE id = ?',
+        [id]
+      );
+      
+      if (companies.length === 0) {
+        return res.status(404).json({ ok: false, error: '租户不存在' });
+      }
+      
+      const contactPhone = companies[0].contact_phone;
+      
+      if (!contactPhone) {
+        return res.status(400).json({ ok: false, error: '租户没有关联的管理员账号' });
+      }
+      
+      // 解锁管理员账号
+      const [result] = await pool.query(
+        'UPDATE users SET is_locked = 0, failed_login_attempts = 0 WHERE username = ? AND company_id = ?',
+        [contactPhone, id]
+      );
+      
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ ok: false, error: '未找到管理员账号' });
+      }
+      
+      res.json({ ok: true, message: '账号已解锁' });
+    } catch (error) {
+      console.error('[Stores] Unlock account error:', error);
+      res.status(500).json({ ok: false, error: error.message });
+    }
+  });
+
+  // 启用/停用租户
+  // PUT /api/stores/company-verifications/:id/toggle-status
+  router.put('/company-verifications/:id/toggle-status', requireSuperAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      
+      // 查询租户的联系电话和当前状态
+      const [companies] = await pool.query(
+        'SELECT contact_phone FROM company_verifications WHERE id = ?',
+        [id]
+      );
+      
+      if (companies.length === 0) {
+        return res.status(404).json({ ok: false, error: '租户不存在' });
+      }
+      
+      const contactPhone = companies[0].contact_phone;
+      
+      if (!contactPhone) {
+        return res.status(400).json({ ok: false, error: '租户没有关联的管理员账号' });
+      }
+      
+      // 查询管理员账号当前状态
+      const [users] = await pool.query(
+        'SELECT id, is_active FROM users WHERE username = ? AND company_id = ?',
+        [contactPhone, id]
+      );
+      
+      if (users.length === 0) {
+        return res.status(404).json({ ok: false, error: '未找到管理员账号' });
+      }
+      
+      const currentStatus = users[0].is_active;
+      const newStatus = currentStatus ? 0 : 1;
+      
+      // 切换状态
+      await pool.query(
+        'UPDATE users SET is_active = ? WHERE id = ?',
+        [newStatus, users[0].id]
+      );
+      
+      res.json({ 
+        ok: true, 
+        data: { 
+          isActive: newStatus === 1,
+          message: newStatus === 1 ? '租户已启用' : '租户已停用'
+        }
+      });
+    } catch (error) {
+      console.error('[Stores] Toggle status error:', error);
       res.status(500).json({ ok: false, error: error.message });
     }
   });
 
   // ==================== 获取单个门店详情 ====================
   // GET /api/stores/:id
-  router.get('/:id', async (req, res) => {
+  router.get('/:id', tenantMiddleware, async (req, res) => {
     const idNum = Number(req.params.id);
     if (!Number.isFinite(idNum) || idNum <= 0) {
       return res.status(400).json({ ok: false, error: 'Invalid store id' });
     }
     
     try {
-      const tenantFilter = getTenantFilter(req);
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+      const tenantFilter = { where: tenantWhere, params: tenantParams };
       
       const [rows] = await pool.query(
         `SELECT * FROM stores 
@@ -545,8 +881,7 @@ export default function buildStoresRouterMySQL(pool) {
 
   // ==================== 创建门店 ====================
   // POST /api/stores
-  // 临时移除 requireRole 检查以便调试
-  router.post('/', async (req, res) => {
+  router.post('/', tenantMiddleware, async (req, res) => {
     console.log('[Stores.POST] Creating store, user:', req.user);
     try {
       const {
@@ -572,12 +907,13 @@ export default function buildStoresRouterMySQL(pool) {
         return res.status(400).json({ ok: false, error: '门店名称不能为空' });
       }
       
-      // 不再检查公司ID（多租户已移除）
-      const companyId = null;
+      // ✅ 从当前用户获取 company_id（多租户隔离）
+      const companyId = req.user.company_id;
       
       // 如果有门店编号，检查是否重复
       if (storeCode) {
-        const tenantFilter = getTenantFilter(req);
+        const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+      const tenantFilter = { where: tenantWhere, params: tenantParams };
         const [existing] = await pool.query(
           `SELECT id FROM stores WHERE store_code = ? AND ${tenantFilter.where} LIMIT 1`,
           [storeCode, ...tenantFilter.params]
@@ -631,8 +967,7 @@ export default function buildStoresRouterMySQL(pool) {
 
   // ==================== 更新门店 ====================
   // PUT /api/stores/:id
-  // 临时移除 requireRole 检查以便调试
-  router.put('/:id', async (req, res) => {
+  router.put('/:id', tenantMiddleware, async (req, res) => {
     console.log('[Stores.PUT] Updating store, user:', req.user);
     const idNum = Number(req.params.id);
     if (!Number.isFinite(idNum) || idNum <= 0) {
@@ -659,7 +994,8 @@ export default function buildStoresRouterMySQL(pool) {
       } = req.body;
       
       // 验证门店是否存在
-      const tenantFilter = getTenantFilter(req);
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+      const tenantFilter = { where: tenantWhere, params: tenantParams };
       const [existingRows] = await pool.query(
         `SELECT id FROM stores WHERE id = ? AND ${tenantFilter.where} LIMIT 1`,
         [idNum, ...tenantFilter.params]
@@ -735,8 +1071,7 @@ export default function buildStoresRouterMySQL(pool) {
 
   // ==================== 删除门店 ====================
   // DELETE /api/stores/:id
-  // 临时移除 requireRole 检查以便调试
-  router.delete('/:id', async (req, res) => {
+  router.delete('/:id', tenantMiddleware, async (req, res) => {
     console.log('[Stores.DELETE] Deleting store, user:', req.user);
     const idNum = Number(req.params.id);
     if (!Number.isFinite(idNum) || idNum <= 0) {
@@ -744,7 +1079,8 @@ export default function buildStoresRouterMySQL(pool) {
     }
     
     try {
-      const tenantFilter = getTenantFilter(req);
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+      const tenantFilter = { where: tenantWhere, params: tenantParams };
       
       // 验证门店是否存在
       const [existingRows] = await pool.query(

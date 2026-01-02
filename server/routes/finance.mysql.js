@@ -2,13 +2,14 @@
  * 财务管理API - 重构版
  * 收款/付款管理、数据导出
  * 
- * 注意：采用一户一库模式，不需要租户隔离过滤
+ * ✅ 多租户支持：通过 tenantMiddleware 自动过滤 company_id
  */
 
 import express from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs/promises';
+import { tenantMiddleware, setTenantId, buildWhereClause } from '../middleware/tenant.js';
 
 // 配置文件上传
 const storage = multer.diskStorage({
@@ -33,8 +34,12 @@ export default function buildFinanceRouter(pool) {
   const router = express.Router();
 
   // ==================== 1. 收款记录列表 ====================
-  router.get('/receipts', async (req, res) => {
+  router.get('/receipts', tenantMiddleware, async (req, res) => {
     try {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/ea6be235-0d47-4460-9a53-426650f4adda',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'finance.mysql.js:37',hypothesisId:'E',message:'财务收款查询开始',data:{user:req.user,tenantFilter:req.tenantFilter},timestamp:Date.now(),sessionId:'debug-session'})}).catch(()=>{});
+      // #endregion
+      
       const page = Number(req.query.page) || 1;
       const pageSize = Number(req.query.pageSize) || 50;
       const offset = (page - 1) * pageSize;
@@ -48,8 +53,14 @@ export default function buildFinanceRouter(pool) {
         maxAmount
       } = req.query;
 
-      let whereClause = `WHERE fr.record_type = 'receipt'`;
-      const params = [];
+      // ✅ 多租户过滤
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+      let whereClause = `WHERE fr.record_type = 'receipt' AND ${tenantWhere}`;
+      const params = [...tenantParams];
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/ea6be235-0d47-4460-9a53-426650f4adda',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'finance.mysql.js:60',hypothesisId:'D,E',message:'财务收款查询条件',data:{whereClause,params,page,pageSize},timestamp:Date.now(),sessionId:'debug-session'})}).catch(()=>{});
+      // #endregion
 
       if (startDate && startDate !== 'undefined') {
         whereClause += ' AND fr.record_date >= ?';
@@ -91,6 +102,10 @@ export default function buildFinanceRouter(pool) {
          LIMIT ? OFFSET ?`,
         [...params, pageSize, offset]
       );
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/ea6be235-0d47-4460-9a53-426650f4adda',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'finance.mysql.js:105',hypothesisId:'E',message:'财务收款查询结果',data:{total:countRows[0]?.total||0,rowCount:rows.length,firstRow:rows[0]},timestamp:Date.now(),sessionId:'debug-session'})}).catch(()=>{});
+      // #endregion
 
       res.json({
         ok: true,
@@ -108,7 +123,7 @@ export default function buildFinanceRouter(pool) {
   });
 
   // ==================== 2. 付款记录列表（原退款改为付款） ====================
-  router.get('/payments', async (req, res) => {
+  router.get('/payments', tenantMiddleware, async (req, res) => {
     try {
       const page = Number(req.query.page) || 1;
       const pageSize = Number(req.query.pageSize) || 50;
@@ -123,8 +138,11 @@ export default function buildFinanceRouter(pool) {
         maxAmount
       } = req.query;
 
-      let whereClause = `WHERE fr.record_type = 'payment'`;
-      const params = [];
+      // ✅ 多租户过滤
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+      // 付款记录包含两种类型：payment（付款）和 refund（退款）
+      let whereClause = `WHERE fr.record_type IN ('payment', 'refund') AND ${tenantWhere}`;
+      const params = [...tenantParams];
 
       if (startDate && startDate !== 'undefined') {
         whereClause += ' AND fr.record_date >= ?';
@@ -497,7 +515,8 @@ export default function buildFinanceRouter(pool) {
         paymentMethod
       } = req.query;
 
-      let whereClause = `WHERE record_type = 'payment'`;
+      // 付款记录包含两种类型：payment（付款）和 refund（退款）
+      let whereClause = `WHERE record_type IN ('payment', 'refund')`;
       const params = [];
 
       if (startDate && startDate !== 'undefined') {

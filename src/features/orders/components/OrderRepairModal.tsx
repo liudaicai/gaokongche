@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Modal, Form, Input, Select, Radio, Button, message } from 'antd';
 import { useDispatch, useSelector } from 'react-redux';
 import { AppDispatch, RootState } from '../../../app/store';
 import { createRepair } from '../../repairs/repairsSlice';
 import { fetchEmployees } from '../../employees/employeesSlice';
+import { fetchOrderById } from '../../orders/ordersSlice';
 
 interface OrderRepairModalProps {
     open: boolean;
@@ -16,20 +17,43 @@ const OrderRepairModal: React.FC<OrderRepairModalProps> = ({ open, onCancel, ord
     const [form] = Form.useForm();
     const employees = useSelector((state: RootState) => state.employees?.employees || []); // Safe access
     const loading = useSelector((state: RootState) => state.repairs.loading);
+    const [fullOrder, setFullOrder] = useState<any>(null);
+    const [loadingOrder, setLoadingOrder] = useState(false);
+    
+    // 使用完整订单数据（如果已加载）或原始order
+    const effectiveOrder = fullOrder || order;
 
     useEffect(() => {
-        if (open) {
+        if (open && order) {
             dispatch(fetchEmployees({}));
-            // Initialize form values
-            if (order) {
-                form.setFieldsValue({
-                    contactName: order.customerContact,
-                    contactPhone: order.customerPhone,
-                    isVideoDiagnosis: false,
-                });
+            
+            // 检查是否缺少entries数据，如果缺少则加载完整订单详情
+            if (!order.entries || order.entries.length === 0) {
+                setLoadingOrder(true);
+                dispatch(fetchOrderById(order.id))
+                    .unwrap()
+                    .then((fullOrderData) => {
+                        setFullOrder(fullOrderData);
+                        setLoadingOrder(false);
+                    })
+                    .catch((error) => {
+                        setLoadingOrder(false);
+                        message.error('加载订单详情失败');
+                    });
+            } else {
+                // 如果已有entries数据，直接使用
+                setFullOrder(order);
             }
+            
+            // Initialize form values
+            form.setFieldsValue({
+                contactName: order.customerContact,
+                contactPhone: order.customerPhone,
+                isVideoDiagnosis: false,
+            });
         } else {
             form.resetFields();
+            setFullOrder(null);
         }
     }, [open, order, dispatch, form]);
 
@@ -37,21 +61,29 @@ const OrderRepairModal: React.FC<OrderRepairModalProps> = ({ open, onCancel, ord
         try {
             const values = await form.validateFields();
 
-            // Find selected equipment to get ID
-            const selectedEquipment = order.equipmentItems?.find(
-                (item: any) => item.equipmentCode === values.equipmentCode
-            );
+            // 从进场记录中查找选中的设备详情
+            let selectedEquipmentDetail: any = null;
+            (effectiveOrder?.entries || []).forEach((entry: any) => {
+                if (entry.equipmentDetails && Array.isArray(entry.equipmentDetails)) {
+                    const found = entry.equipmentDetails.find(
+                        (detail: any) => detail.code === values.equipmentCode
+                    );
+                    if (found) {
+                        selectedEquipmentDetail = found;
+                    }
+                }
+            });
 
             const payload = {
                 equipmentCode: values.equipmentCode,
-                equipmentId: selectedEquipment?.equipmentId || selectedEquipment?.id, // Try to find ID
-                orderId: order.id,
+                equipmentId: selectedEquipmentDetail?.equipmentId || selectedEquipmentDetail?.id,
+                orderId: effectiveOrder?.id || order?.id,
                 damageDescription: values.damageDescription,
                 repairPerson: values.repairPerson,
                 isVideoDiagnosis: values.isVideoDiagnosis,
                 contactName: values.contactName,
                 contactPhone: values.contactPhone,
-                repairStartDate: new Date().toISOString().slice(0, 10), // Default to today?
+                repairStartDate: new Date().toISOString().slice(0, 10), // Default to today
                 status: 'pending' as const
             };
 
@@ -67,14 +99,50 @@ const OrderRepairModal: React.FC<OrderRepairModalProps> = ({ open, onCancel, ord
         }
     };
 
-    // Filter equipment items (assuming standard structure)
+    // 从进场记录中获取已进场的设备列表
     const equipmentOptions = useMemo(() => {
-        if (!order || !order.equipmentItems) return [];
-        return order.equipmentItems.map((item: any) => ({
-            label: `${item.equipmentCode || item.code} (${item.specification || item.model})`,
-            value: item.equipmentCode
-        }));
-    }, [order]);
+        if (!effectiveOrder || !effectiveOrder.entries) {
+            return [];
+        }
+        
+        // 收集所有进场记录中的设备详情
+        const allEquipment: any[] = [];
+        (effectiveOrder.entries || []).forEach((entry: any) => {
+            if (entry.equipmentDetails && Array.isArray(entry.equipmentDetails)) {
+                entry.equipmentDetails.forEach((detail: any) => {
+                    // 检查该设备是否已退场
+                    const code = detail.code || '';
+                    const hasExited = (effectiveOrder.exits || []).some((exit: any) => 
+                        (exit.equipmentCodes || []).includes(code)
+                    );
+                    
+                    // 只添加未退场的设备
+                    if (!hasExited && code) {
+                        allEquipment.push({
+                            code: code,
+                            customCode: detail.customCode || '',
+                            type: detail.type || '',
+                            model: detail.model || '',
+                            brand: detail.brand || '',
+                            height: detail.height || ''
+                        });
+                    }
+                });
+            }
+        });
+        
+        // 生成下拉选项
+        return allEquipment.map((eq) => {
+            const displayCode = eq.customCode || eq.code;
+            const displaySpec = [eq.brand, eq.type, eq.model, eq.height]
+                .filter(Boolean)
+                .join(' ');
+            return {
+                label: `${displayCode}${displaySpec ? ` (${displaySpec})` : ''}`,
+                value: eq.code
+            };
+        });
+    }, [effectiveOrder]);
 
     const employeeOptions = useMemo(() => {
         return employees.map((emp: any) => ({
@@ -90,7 +158,7 @@ const OrderRepairModal: React.FC<OrderRepairModalProps> = ({ open, onCancel, ord
             onCancel={onCancel}
             footer={[
                 <Button key="cancel" onClick={onCancel}>取消</Button>,
-                <Button key="submit" type="primary" loading={loading} onClick={handleSubmit}>
+                <Button key="submit" type="primary" loading={loading || loadingOrder} onClick={handleSubmit} disabled={loadingOrder}>
                     提交
                 </Button>
             ]}
@@ -105,7 +173,12 @@ const OrderRepairModal: React.FC<OrderRepairModalProps> = ({ open, onCancel, ord
                     label="报修设备"
                     rules={[{ required: true, message: '请选择报修设备' }]}
                 >
-                    <Select placeholder="选择订单下的在租设备" options={equipmentOptions} />
+                    <Select 
+                        placeholder={loadingOrder ? "正在加载设备列表..." : "选择订单下的在租设备"} 
+                        options={equipmentOptions}
+                        loading={loadingOrder}
+                        disabled={loadingOrder}
+                    />
                 </Form.Item>
 
                 <Form.Item

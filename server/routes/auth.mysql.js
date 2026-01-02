@@ -49,9 +49,9 @@ export default function buildAuthRouter(pool) {
         const [rows] = await pool.query(
           `SELECT u.id, u.username, u.password_hash, u.role, u.name, u.email, u.phone, u.company_id,
                   u.is_active, u.is_locked, u.failed_login_attempts,
-                  c.name as company_name
+                  cv.company_name as company_name
            FROM users u
-           LEFT JOIN companies c ON u.company_id = c.id
+           LEFT JOIN company_verifications cv ON u.company_id = cv.id
            WHERE u.username = ?`,
           [username]
         );
@@ -135,7 +135,7 @@ export default function buildAuthRouter(pool) {
         const token = generateToken({
           id: String(user.id),
           username: user.username,
-          name: user.name || user.username, // 添加姓名字段
+          name: user.name || user.username,
           role: user.role,
           company_id: user.company_id,
         });

@@ -321,6 +321,7 @@ export const deleteCustomer = (id: string) => async (dispatch: any) => {
     dispatch(deleteCustomerSuccess(id));
   } catch (err: any) {
     dispatch(deleteCustomerFailure(err?.message || '删除客户失败'));
+    throw err;
   }
 };
 

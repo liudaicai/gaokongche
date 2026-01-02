@@ -4,6 +4,7 @@
  */
 
 import express from 'express';
+import { tenantMiddleware } from '../middleware/tenant.js';
 
 export default function buildSubleaseRouter(pool) {
   const router = express.Router();
@@ -73,7 +74,7 @@ export default function buildSubleaseRouter(pool) {
    * 获取转租公司列表
    * GET /api/sublease/companies
    */
-  router.get('/companies', async (req, res) => {
+  router.get('/companies', tenantMiddleware, async (req, res) => {
     try {
       const {
         page = 1,
@@ -85,8 +86,12 @@ export default function buildSubleaseRouter(pool) {
       const offset = (Number(page) - 1) * Number(pageSize);
       const limit = Number(pageSize);
 
-      let whereClauses = [];
-      let queryParams = [];
+      // ✅ 多租户过滤 - 为 company_id 添加表前缀以避免歧义
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+      // 为 company_id 添加表前缀 sc. 以避免 JOIN 时的歧义
+      const tenantWhereWithPrefix = tenantWhere.replace('WHERE ', '').replace(/\bcompany_id\b/g, 'sc.company_id');
+      let whereClauses = [tenantWhereWithPrefix];
+      let queryParams = [...tenantParams];
 
       if (search) {
         whereClauses.push('(sc.company_name LIKE ? OR sc.contact_person LIKE ? OR sc.contact_phone LIKE ?)');
@@ -98,7 +103,7 @@ export default function buildSubleaseRouter(pool) {
         queryParams.push(status);
       }
 
-      const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+      const whereSQL = `WHERE ${whereClauses.join(' AND ')}`;
 
       // 查询总数
       const [countRows] = await pool.query(
@@ -146,10 +151,12 @@ export default function buildSubleaseRouter(pool) {
    * 获取单个转租公司详情
    * GET /api/sublease/companies/:id
    */
-  router.get('/companies/:id', async (req, res) => {
+  router.get('/companies/:id', tenantMiddleware, async (req, res) => {
     try {
       const id = Number(req.params.id);
 
+      // ✅ 多租户过滤
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
       const [rows] = await pool.query(
         `SELECT sc.*,
           COUNT(CASE WHEN se.status = 'renting' THEN 1 END) as renting_count,
@@ -160,9 +167,9 @@ export default function buildSubleaseRouter(pool) {
           COALESCE(SUM(se.outstanding_amount), 0) as outstanding_amount
          FROM sublease_companies sc
          LEFT JOIN sublease_equipments se ON sc.id = se.company_id
-         WHERE sc.id = ?
+         WHERE sc.id = ? AND ${tenantWhere}
          GROUP BY sc.id`,
-        [id]
+        [id, ...tenantParams]
       );
 
       if (rows.length === 0) {
@@ -184,7 +191,7 @@ export default function buildSubleaseRouter(pool) {
    * 创建转租公司
    * POST /api/sublease/companies
    */
-  router.post('/companies', async (req, res) => {
+  router.post('/companies', tenantMiddleware, async (req, res) => {
     try {
       const {
         companyName,
@@ -197,12 +204,15 @@ export default function buildSubleaseRouter(pool) {
         return res.status(400).json({ ok: false, error: '公司名称为必填项' });
       }
 
+      // ✅ 从当前用户获取 company_id（多租户隔离）
+      const companyId = req.user.company_id;
+
       const [result] = await pool.query(
         `INSERT INTO sublease_companies (
-          company_name, contact_person, contact_phone, address, created_by
-        ) VALUES (?, ?, ?, ?, ?)`,
+          company_id, company_name, contact_person, contact_phone, address, created_by
+        ) VALUES (?, ?, ?, ?, ?, ?)`,
         [
-          companyName, contactPerson, contactPhone, address, req.user.id
+          companyId, companyName, contactPerson, contactPhone, address, req.user.id
         ]
       );
 
@@ -221,7 +231,7 @@ export default function buildSubleaseRouter(pool) {
    * 更新转租公司
    * PUT /api/sublease/companies/:id
    */
-  router.put('/companies/:id', async (req, res) => {
+  router.put('/companies/:id', tenantMiddleware, async (req, res) => {
     try {
       const id = Number(req.params.id);
       const updates = req.body;
@@ -248,9 +258,12 @@ export default function buildSubleaseRouter(pool) {
         return res.status(400).json({ ok: false, error: '没有要更新的字段' });
       }
 
+      // ✅ 多租户过滤：更新时包含租户条件
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
       values.push(id);
+      values.push(...tenantParams);
       await pool.query(
-        `UPDATE sublease_companies SET ${fields.join(', ')} WHERE id = ?`,
+        `UPDATE sublease_companies SET ${fields.join(', ')} WHERE id = ? AND ${tenantWhere}`,
         values
       );
 
@@ -265,13 +278,25 @@ export default function buildSubleaseRouter(pool) {
    * 删除转租公司
    * DELETE /api/sublease/companies/:id
    */
-  router.delete('/companies/:id', async (req, res) => {
+  router.delete('/companies/:id', tenantMiddleware, async (req, res) => {
     const conn = await pool.getConnection();
     
     try {
       await conn.beginTransaction();
       
       const id = Number(req.params.id);
+
+      // ✅ 多租户过滤：先检查公司是否属于当前租户
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+      const [existing] = await conn.query(
+        `SELECT id FROM sublease_companies WHERE id = ? AND ${tenantWhere}`,
+        [id, ...tenantParams]
+      );
+
+      if (existing.length === 0) {
+        await conn.rollback();
+        return res.status(404).json({ ok: false, error: '转租公司不存在或无权访问' });
+      }
 
       // 查询关联设备数量（用于返回消息）
       const [equipments] = await conn.query(
@@ -286,8 +311,11 @@ export default function buildSubleaseRouter(pool) {
         await conn.query('DELETE FROM sublease_equipments WHERE company_id = ?', [id]);
       }
 
-      // 删除公司记录
-      await conn.query('DELETE FROM sublease_companies WHERE id = ?', [id]);
+      // 删除公司记录（包含租户条件）
+      await conn.query(
+        `DELETE FROM sublease_companies WHERE id = ? AND ${tenantWhere}`,
+        [id, ...tenantParams]
+      );
 
       await conn.commit();
 
@@ -312,7 +340,7 @@ export default function buildSubleaseRouter(pool) {
    * 获取转租设备列表
    * GET /api/sublease/equipments
    */
-  router.get('/equipments', async (req, res) => {
+  router.get('/equipments', tenantMiddleware, async (req, res) => {
     try {
       const {
         page = 1,
@@ -325,8 +353,11 @@ export default function buildSubleaseRouter(pool) {
       const offset = (Number(page) - 1) * Number(pageSize);
       const limit = Number(pageSize);
 
-      let whereClauses = [];
-      let queryParams = [];
+      // ✅ 多租户过滤
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+      const tenantWhereClean = tenantWhere.replace('WHERE ', '').replace(/\bcompany_id\b/g, 'tenant_company_id');
+      let whereClauses = [tenantWhereClean];
+      let queryParams = [...tenantParams];
 
       if (companyId) {
         whereClauses.push('company_id = ?');
@@ -343,7 +374,7 @@ export default function buildSubleaseRouter(pool) {
         queryParams.push(`%${search}%`, `%${search}%`, `%${search}%`);
       }
 
-      const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+      const whereSQL = `WHERE ${whereClauses.join(' AND ')}`;
 
       // 查询总数
       const [countRows] = await pool.query(
@@ -381,7 +412,7 @@ export default function buildSubleaseRouter(pool) {
    * 创建转租设备
    * POST /api/sublease/equipments
    */
-  router.post('/equipments', async (req, res) => {
+  router.post('/equipments', tenantMiddleware, async (req, res) => {
     const conn = await pool.getConnection();
     
     try {
@@ -444,19 +475,22 @@ export default function buildSubleaseRouter(pool) {
         }
       }
 
+      // ✅ 从当前用户获取 tenant_company_id（多租户隔离）
+      const tenantCompanyId = req.user.company_id;
+
       // 1. 在转租设备表中创建记录
       console.log('[Sublease.POST/equipments] 步骤1: 插入转租设备表');
       const [result] = await conn.query(
         `INSERT INTO sublease_equipments (
-          company_id, company_name, store_id, store_name,
+          tenant_company_id, company_id, company_name, store_id, store_name,
           equipment_code, factory_number,
           category, equipment_type, model, brand, height,
           daily_rate, monthly_rate, deposit,
           start_date, end_date, rental_days, total_cost, outstanding_amount,
           status, linked_order_id, linked_order_number, remark, created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          companyId, companyName, storeId, storeName,
+          tenantCompanyId, companyId, companyName, storeId, storeName,
           equipmentCode, factoryNumber,
           category, equipmentType, model, brand, height,
           dailyRate || 0, monthlyRate || 0, deposit || 0,
@@ -582,7 +616,7 @@ export default function buildSubleaseRouter(pool) {
    * 通过出厂编号查询转租设备ID
    * GET /api/sublease/equipments/by-factory-number/:factoryNumber
    */
-  router.get('/equipments/by-factory-number/:factoryNumber', async (req, res) => {
+  router.get('/equipments/by-factory-number/:factoryNumber', tenantMiddleware, async (req, res) => {
     try {
       const factoryNumber = req.params.factoryNumber;
       
@@ -609,7 +643,7 @@ export default function buildSubleaseRouter(pool) {
    * 还租设备
    * PUT /api/sublease/equipments/:id/return
    */
-  router.put('/equipments/:id/return', async (req, res) => {
+  router.put('/equipments/:id/return', tenantMiddleware, async (req, res) => {
     const conn = await pool.getConnection();
     
     try {
@@ -673,7 +707,7 @@ export default function buildSubleaseRouter(pool) {
    * 报停设备
    * PUT /api/sublease/equipments/:id/suspend
    */
-  router.put('/equipments/:id/suspend', async (req, res) => {
+  router.put('/equipments/:id/suspend', tenantMiddleware, async (req, res) => {
     try {
       const id = Number(req.params.id);
       const { suspensionReason, suspensionStartDate, suspensionEndDate } = req.body;
@@ -699,7 +733,7 @@ export default function buildSubleaseRouter(pool) {
    * 更新设备
    * PUT /api/sublease/equipments/:id
    */
-  router.put('/equipments/:id', async (req, res) => {
+  router.put('/equipments/:id', tenantMiddleware, async (req, res) => {
     try {
       const id = Number(req.params.id);
       const updates = req.body;
@@ -753,7 +787,7 @@ export default function buildSubleaseRouter(pool) {
    * 创建付款记录
    * POST /api/sublease/payments
    */
-  router.post('/payments', async (req, res) => {
+  router.post('/payments', tenantMiddleware, async (req, res) => {
     const conn = await pool.getConnection();
     
     try {
@@ -845,7 +879,7 @@ export default function buildSubleaseRouter(pool) {
    * 获取付款记录列表
    * GET /api/sublease/payments
    */
-  router.get('/payments', async (req, res) => {
+  router.get('/payments', tenantMiddleware, async (req, res) => {
     try {
       const { companyId } = req.query;
 
@@ -875,7 +909,7 @@ export default function buildSubleaseRouter(pool) {
    * 创建对账记录
    * POST /api/sublease/reconciliations
    */
-  router.post('/reconciliations', async (req, res) => {
+  router.post('/reconciliations', tenantMiddleware, async (req, res) => {
     try {
       const {
         companyId,
@@ -935,7 +969,7 @@ export default function buildSubleaseRouter(pool) {
    * 获取对账记录列表
    * GET /api/sublease/reconciliations
    */
-  router.get('/reconciliations', async (req, res) => {
+  router.get('/reconciliations', tenantMiddleware, async (req, res) => {
     try {
       const { companyId } = req.query;
 

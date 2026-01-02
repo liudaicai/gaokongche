@@ -410,7 +410,7 @@ const ReminderCenter: React.FC = () => {
       </Row>
 
       {/* 筛选和列表区域 */}
-      <Card style={styles.tableCard} bordered={false} bodyStyle={{ padding: '0 24px 24px' }}>
+      <Card style={styles.tableCard} bordered={false} styles={{ body: { padding: '0 24px 24px' } }}>
         {/* 筛选工具栏 */}
         <div style={{ padding: '24px 0', borderBottom: '1px solid #f0f0f0', marginBottom: '16px' }}>
           <Row gutter={[16, 16]} align="middle" justify="space-between">
@@ -509,7 +509,7 @@ const ReminderCenter: React.FC = () => {
           setCurrentReminder(null);
           setHandleNote('');
         }}
-        bodyStyle={{ padding: '24px' }}
+        styles={{ body: { padding: '24px' } }}
       >
         {currentReminder && (
           <div>

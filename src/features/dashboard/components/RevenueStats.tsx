@@ -29,11 +29,6 @@ const RevenueStats: React.FC = () => {
 
   // 处理和聚合趋势数据
   const chartData = useMemo(() => {
-    console.log('[营收图表] ===== 开始处理数据 =====');
-    console.log('[营收图表] 时间模式:', timeMode);
-    console.log('[营收图表] 原始数据总数:', trends?.orders?.length || 0);
-    console.log('[营收图表] 原始数据前3条:', trends?.orders?.slice(0, 3));
-    
     if (timeMode === 'day') {
       // 按日显示
       if (!trends?.orders || trends.orders.length === 0) return [];
@@ -51,9 +46,6 @@ const RevenueStats: React.FC = () => {
       const endMonth = dateRange[1].startOf('month');
       let currentMonth = startMonth;
       
-      console.log('[营收图表] 日期范围:', dateRange[0].format('YYYY-MM-DD'), '到', dateRange[1].format('YYYY-MM-DD'));
-      console.log('[营收图表] 起始月份:', startMonth.format('YYYY-MM'), '结束月份:', endMonth.format('YYYY-MM'));
-      
       while (currentMonth.isBefore(endMonth) || currentMonth.isSame(endMonth, 'month')) {
         const monthKey = currentMonth.format('YYYY-MM');
         monthlyData.set(monthKey, { revenue: 0, received: 0 });
@@ -66,19 +58,13 @@ const RevenueStats: React.FC = () => {
       if (trends?.orders && trends.orders.length > 0) {
         trends.orders.forEach(item => {
           const monthKey = dayjs(item.date).format('YYYY-MM');
-          console.log('[营收图表] 处理数据项:', { date: item.date, monthKey, revenue: item.revenue, received: (item as any).received });
           if (monthlyData.has(monthKey)) {
             const existing = monthlyData.get(monthKey)!;
             existing.revenue += item.revenue;
             existing.received += (item as any).received || 0;
-            console.log('[营收图表] 更新月份', monthKey, ':', existing);
-          } else {
-            console.warn('[营收图表] ⚠️ 数据项月份不在范围内:', monthKey);
           }
         });
       }
-      
-      console.log('[营收图表] 聚合后的月度数据:', Array.from(monthlyData.entries()));
       
       // 3. 转换为数组并排序
       const result = Array.from(monthlyData.entries())
@@ -88,9 +74,6 @@ const RevenueStats: React.FC = () => {
           revenue: data.revenue,
           received: data.received,
         }));
-      
-      console.log('[营收图表] 最终图表数据:', result);
-      console.log('[营收图表] ===== 数据处理完成 =====');
       
       return result;
     }
@@ -104,7 +87,6 @@ const RevenueStats: React.FC = () => {
     // 向上取整到合适的值
     const magnitude = Math.pow(10, Math.floor(Math.log10(max || 1)));
     const result = Math.ceil((max * 1.2) / magnitude) * magnitude; // 留20%的空间
-    console.log('[营收图表] Y轴最大值计算:', { max, magnitude, result });
     return result;
   }, [chartData]);
 

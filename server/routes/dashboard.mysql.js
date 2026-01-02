@@ -1,13 +1,17 @@
 // Dashboard统计数据路由
 import express from 'express';
+import { tenantMiddleware } from '../middleware/tenant.js';
 import { calculateOrderRevenue } from '../services/revenueCalculator.js';
 
 export default function buildDashboardRouter(pool) {
   const router = express.Router();
 
   // GET /api/dashboard/kpi - 获取关键指标
-  router.get('/kpi', async (req, res) => {
+  router.get('/kpi', tenantMiddleware, async (req, res) => {
     try {
+      // ✅ 多租户过滤条件
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
+      
       // 1. 设备总数和状态统计（使用rental_status字段，NULL视为available）
       const [equipmentStats] = await pool.query(
         `SELECT 
@@ -16,12 +20,14 @@ export default function buildDashboardRouter(pool) {
           SUM(CASE WHEN COALESCE(rental_status, 'available') = 'renting' THEN 1 ELSE 0 END) as renting,
           SUM(CASE WHEN COALESCE(rental_status, 'available') IN ('maintenance', 'repairing', 'mass', 'repair') THEN 1 ELSE 0 END) as maintenance
          FROM equipments e
-         WHERE e.deleted_at IS NULL`
+         WHERE e.deleted_at IS NULL AND e.${tenantWhere}`,
+        tenantParams
       );
 
       // 2. 客户总数
       const [customerStats] = await pool.query(
-        `SELECT COUNT(*) as total FROM customers WHERE deleted_at IS NULL`
+        `SELECT COUNT(*) as total FROM customers WHERE deleted_at IS NULL AND ${tenantWhere}`,
+        tenantParams
       );
 
       // 3. 订单统计（兼容多种状态值）
@@ -32,7 +38,8 @@ export default function buildDashboardRouter(pool) {
           SUM(CASE WHEN status IN ('in_progress', 'ongoing', 'active') THEN 1 ELSE 0 END) as in_progress,
           SUM(CASE WHEN status IN ('completed', 'finished', 'closed') THEN 1 ELSE 0 END) as completed
          FROM orders
-         WHERE deleted_at IS NULL`
+         WHERE deleted_at IS NULL AND ${tenantWhere}`,
+        tenantParams
       );
 
       // 4. 本月营收统计（使用动态计算）
@@ -41,7 +48,9 @@ export default function buildDashboardRouter(pool) {
         `SELECT id FROM orders 
          WHERE deleted_at IS NULL 
          AND status NOT IN ('cancelled', 'deleted')
-         AND created_at <= NOW()`
+         AND created_at <= NOW()
+         AND ${tenantWhere}`,
+        tenantParams
       );
       
       // 动态计算本月创收
@@ -72,14 +81,17 @@ export default function buildDashboardRouter(pool) {
         total_revenue: currentMonthRevenue // 简化，实际应该计算所有时间的总额
       }];
 
-      // 5. 本月实收金额（从收款记录表统计）
+      // 5. 本月实收金额（从财务记录表统计）
       const [receivedStats] = await pool.query(
         `SELECT 
-          COALESCE(SUM(CASE WHEN DATE_FORMAT(receipt_date, '%Y-%m') = DATE_FORMAT(NOW(), '%Y-%m') THEN COALESCE(amount, 0) ELSE 0 END), 0) as current_month_received,
-          COALESCE(SUM(CASE WHEN DATE_FORMAT(receipt_date, '%Y-%m') = DATE_FORMAT(DATE_SUB(NOW(), INTERVAL 1 MONTH), '%Y-%m') THEN COALESCE(amount, 0) ELSE 0 END), 0) as last_month_received
-         FROM order_receipts
-         WHERE receipt_date IS NOT NULL
-         AND receipt_date >= DATE_SUB(NOW(), INTERVAL 2 MONTH)`
+          COALESCE(SUM(CASE WHEN DATE_FORMAT(record_date, '%Y-%m') = DATE_FORMAT(NOW(), '%Y-%m') THEN COALESCE(amount, 0) ELSE 0 END), 0) as current_month_received,
+          COALESCE(SUM(CASE WHEN DATE_FORMAT(record_date, '%Y-%m') = DATE_FORMAT(DATE_SUB(NOW(), INTERVAL 1 MONTH), '%Y-%m') THEN COALESCE(amount, 0) ELSE 0 END), 0) as last_month_received
+         FROM finance_records
+         WHERE record_type = 'receipt'
+         AND record_date IS NOT NULL
+         AND record_date >= DATE_SUB(NOW(), INTERVAL 2 MONTH)
+         AND ${tenantWhere}`,
+        tenantParams
       );
 
       const responseData = {
@@ -124,9 +136,12 @@ export default function buildDashboardRouter(pool) {
   });
 
   // GET /api/dashboard/trends - 获取趋势数据
-  router.get('/trends', async (req, res) => {
+  router.get('/trends', tenantMiddleware, async (req, res) => {
     try {
       const days = Number(req.query.days) || 30;
+      
+      // ✅ 多租户过滤条件
+      const { where: tenantWhere, params: tenantParams } = req.tenantFilter;
       
       // 1. 订单趋势（创收金额 - 使用动态计算）
       console.log(`[Dashboard Trends] 开始计算最近${days}天的动态创收...`);
@@ -136,7 +151,9 @@ export default function buildDashboardRouter(pool) {
         `SELECT id FROM orders 
          WHERE deleted_at IS NULL 
          AND status NOT IN ('cancelled', 'deleted')
-         AND created_at <= CURDATE()`
+         AND created_at <= CURDATE()
+         AND ${tenantWhere}`,
+        tenantParams
       );
       
       // 生成日期范围
@@ -169,12 +186,14 @@ export default function buildDashboardRouter(pool) {
       // 2. 实收趋势（收款金额）
       const [receiptTrends] = await pool.query(
         `SELECT 
-          DATE(receipt_date) as date,
+          DATE(record_date) as date,
           COALESCE(SUM(COALESCE(amount, 0)), 0) as received
-         FROM order_receipts
-         WHERE receipt_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
-         GROUP BY DATE(receipt_date)`,
-         [days]
+         FROM finance_records
+         WHERE record_type = 'receipt'
+         AND record_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+         AND ${tenantWhere}
+         GROUP BY DATE(record_date)`,
+         [days, ...tenantParams]
       );
 
       // 3. 合并数据
@@ -219,7 +238,7 @@ export default function buildDashboardRouter(pool) {
   });
 
   // GET /api/dashboard/equipment-price-trends - 按设备高度获取价格趋势（按年+月）
-  router.get('/equipment-price-trends', async (req, res) => {
+  router.get('/equipment-price-trends', tenantMiddleware, async (req, res) => {
     try {
       const year = Number(req.query.year) || new Date().getFullYear();
       const height = req.query.height || 'all'; // 设备高度筛选
@@ -232,33 +251,31 @@ export default function buildDashboardRouter(pool) {
       if (height !== 'all') {
         // 从 "4米" 提取数字 "4"
         const heightValue = parseFloat(height.replace('米', ''));
-        heightFilter = 'AND oed.equipment_height = ?';
+        heightFilter = 'AND oi.height = ?';
         params.push(heightValue);
         console.log('[Dashboard] 筛选高度:', heightValue);
       }
       
       // 按设备高度统计价格趋势（按月聚合，区分天租和月租）
-      // 使用 order_equipment_demands 表中的 equipment_height 字段
+      // 使用 order_items 表中的 height 字段
       const [priceTrends] = await pool.query(
         `SELECT 
           DATE_FORMAT(o.created_at, '%Y-%m') as month,
-          CAST(oed.equipment_height AS UNSIGNED) as height_value,
-          CONCAT(CAST(oed.equipment_height AS UNSIGNED), '米') as height,
-          AVG(CASE WHEN o.billing_method = 'daily' THEN oed.daily_rate ELSE NULL END) as avg_daily_price,
-          AVG(CASE WHEN o.billing_method = 'monthly' THEN oed.monthly_rate ELSE NULL END) as avg_monthly_price,
-          COUNT(DISTINCT CASE WHEN o.billing_method = 'daily' THEN o.id END) as daily_order_count,
-          COUNT(DISTINCT CASE WHEN o.billing_method = 'monthly' THEN o.id END) as monthly_order_count,
+          CAST(oi.height AS UNSIGNED) as height_value,
+          CONCAT(CAST(oi.height AS UNSIGNED), '米') as height,
+          AVG(oi.daily_rate) as avg_daily_price,
+          AVG(oi.monthly_rate) as avg_monthly_price,
+          COUNT(DISTINCT o.id) as daily_order_count,
+          COUNT(DISTINCT o.id) as monthly_order_count,
           COUNT(DISTINCT o.id) as total_order_count
          FROM orders o
-         INNER JOIN order_equipment_demands oed ON o.id = oed.order_id
-         WHERE o.deleted_at IS NULL
-         AND YEAR(o.created_at) = ?
-         AND o.status NOT IN ('cancelled', 'deleted')
-         AND oed.equipment_height IS NOT NULL
+         INNER JOIN order_items oi ON o.id = oi.order_id
+         WHERE YEAR(o.created_at) = ?
+         AND oi.height IS NOT NULL
          ${heightFilter}
-         GROUP BY DATE_FORMAT(o.created_at, '%Y-%m'), CAST(oed.equipment_height AS UNSIGNED), CONCAT(CAST(oed.equipment_height AS UNSIGNED), '米')
+         GROUP BY DATE_FORMAT(o.created_at, '%Y-%m'), CAST(oi.height AS UNSIGNED), CONCAT(CAST(oi.height AS UNSIGNED), '米')
          ORDER BY month ASC, height_value ASC`,
-         params
+        params
       );
 
       console.log('[Dashboard] 价格趋势数据量:', priceTrends.length);
@@ -269,13 +286,11 @@ export default function buildDashboardRouter(pool) {
       // 始终查询可用的设备高度列表（从订单需求中获取实际使用的高度）
       const [heightsList] = await pool.query(
         `SELECT DISTINCT 
-           CAST(oed.equipment_height AS UNSIGNED) as height, 
-           CONCAT(CAST(oed.equipment_height AS UNSIGNED), '米') as height_label
-         FROM order_equipment_demands oed
-         INNER JOIN orders o ON oed.order_id = o.id
-         WHERE oed.equipment_height IS NOT NULL 
-         AND o.deleted_at IS NULL
-         AND o.status NOT IN ('cancelled', 'deleted')
+           CAST(oi.height AS UNSIGNED) as height, 
+           CONCAT(CAST(oi.height AS UNSIGNED), '米') as height_label
+         FROM order_items oi
+         INNER JOIN orders o ON oi.order_id = o.id
+         WHERE oi.height IS NOT NULL 
          ORDER BY height ASC`
       );
 
@@ -304,7 +319,7 @@ export default function buildDashboardRouter(pool) {
   });
 
   // GET /api/dashboard/alerts - 获取重要提醒
-  router.get('/alerts', async (req, res) => {
+  router.get('/alerts', tenantMiddleware, async (req, res) => {
     try {
       const alerts = [];
 
@@ -403,7 +418,7 @@ export default function buildDashboardRouter(pool) {
   });
 
   // GET /api/dashboard/recent-activities - 获取最近活动
-  router.get('/recent-activities', async (req, res) => {
+  router.get('/recent-activities', tenantMiddleware, async (req, res) => {
     try {
       const limit = Number(req.query.limit) || 10;
       const activities = [];
@@ -468,7 +483,7 @@ export default function buildDashboardRouter(pool) {
   });
 
   // GET /api/dashboard/equipment-utilization - 资产利用率统计
-  router.get('/equipment-utilization', async (req, res) => {
+  router.get('/equipment-utilization', tenantMiddleware, async (req, res) => {
     try {
       console.log('[Dashboard] 计算资产利用率...');
       

@@ -41,6 +41,13 @@ import buildDepartmentsRouter from './routes/departments.mysql.js';
 import buildPositionsRouter from './routes/positions.mysql.js';
 import buildEquipmentRentStatsRouter from './routes/equipment-rent-stats.mysql.js';
 import buildEquipmentPurchasesRouter from './routes/equipment-purchases.mysql.js';
+import buildOperatorCertificatesRouter from './routes/operator-certificates.mysql.js';
+import buildSealsRouter from './routes/seals.mysql.js';
+import buildFinanceRouter from './routes/finance.mysql.js';
+import buildTemplatesRouter from './routes/templates.mysql.js';
+import buildTenantCompaniesRouter from './routes/tenant-companies.mysql.js';
+import buildPermissionsRouter from './routes/permissions.mysql.js';
+import buildBlacklistRouter from './routes/blacklist.mysql.js';
 
 const app = express();
 // 增加 body 大小限制，支持 OCR 图片上传（base64 图片较大）
@@ -78,9 +85,10 @@ app.use(cors({
 const mysql = await initMySQL();
 // 暴露MySQL池到app.locals，便于路由中使用
 app.locals.mysqlPool = mysql.pool;
+app.locals.pool = mysql.pool; // 别名，便于中间件使用
 
-// 静态资源：提供上传文件访问
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// 静态资源：提供上传文件访问（从项目根目录读取）
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 // API健康检查
 app.get('/api/health', (req, res) => {
@@ -180,10 +188,20 @@ app.use('/api/approvals', authMiddleware, (req, res, next) => { console.log('[Hi
 app.use('/api/approval-config', authMiddleware, (req, res, next) => { console.log('[Hit] approval-config mount', req.method, req.originalUrl); next(); }, buildApprovalConfigRouter(mysql.pool));
 app.use('/api/departments', authMiddleware, (req, res, next) => { console.log('[Hit] departments mount', req.method, req.originalUrl); next(); }, buildDepartmentsRouter(mysql.pool));
 app.use('/api/positions', authMiddleware, (req, res, next) => { console.log('[Hit] positions mount', req.method, req.originalUrl); next(); }, buildPositionsRouter(mysql.pool));
+// 操作证路由（verify接口公开访问，其他需要认证）
+const operatorCertificatesRouter = buildOperatorCertificatesRouter(mysql.pool);
+app.use('/api/operator-certificates/verify', (req, res, next) => { console.log('[Hit] certificate verify (public)', req.method, req.originalUrl); next(); }, operatorCertificatesRouter);
+app.use('/api/operator-certificates', authMiddleware, (req, res, next) => { console.log('[Hit] operator-certificates mount', req.method, req.originalUrl); next(); }, operatorCertificatesRouter);
+app.use('/api/seals', authMiddleware, (req, res, next) => { console.log('[Hit] seals mount', req.method, req.originalUrl); next(); }, buildSealsRouter(mysql.pool));
+app.use('/api/finance', authMiddleware, (req, res, next) => { console.log('[Hit] finance mount', req.method, req.originalUrl); next(); }, buildFinanceRouter(mysql.pool));
+app.use('/api/templates', authMiddleware, (req, res, next) => { console.log('[Hit] templates mount', req.method, req.originalUrl); next(); }, buildTemplatesRouter(mysql.pool));
+app.use('/api/tenant-companies', authMiddleware, (req, res, next) => { console.log('[Hit] tenant-companies mount', req.method, req.originalUrl); next(); }, buildTenantCompaniesRouter(mysql.pool));
+app.use('/api/permissions', authMiddleware, (req, res, next) => { console.log('[Hit] permissions mount', req.method, req.originalUrl); next(); }, buildPermissionsRouter(mysql.pool));
+app.use('/api/blacklist', (req, res, next) => { console.log('[Hit] blacklist mount', req.method, req.originalUrl); next(); }, buildBlacklistRouter(mysql.pool));
 
 app.use('/api/upload', buildUploadRouter());
 
-const PORT = process.env.API_PORT || 3001;
+const PORT = process.env.API_PORT || 3003;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`API server listening at http://0.0.0.0:${PORT}`);
 });
